@@ -14,7 +14,7 @@ server:
   middlewares:
     static:
         enable: true
-        must_exist: true
+        must_exist: false
         folder:
           uri: "/"                      # Serves files at root (e.g. /nineball.js)
           path: "assets/static/pkg"     # The folder on disk you confirmed
