@@ -1,0 +1,45 @@
+# Dockerfile.allocator
+FROM rust:1-slim-bookworm as builder
+
+WORKDIR /usr/src/app
+
+# FIX: Added libasound2-dev (Audio) and libudev-dev (Input/USB) for Bevy
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    libasound2-dev \
+    libudev-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY . .
+
+# 1. Build Allocator
+RUN cargo build --release -p nineballnetallocator
+
+# 2. Build Game Server
+# Note: Ensure "server" matches the [[bin]] name in nine_ball_game/Cargo.toml
+RUN cargo build --release -p nine_ball_game --bin server
+
+# --- Stage 2: Runtime ---
+FROM debian:bookworm-slim
+
+# FIX: Install runtime libraries for Audio/SSL
+RUN apt-get update && apt-get install -y \
+    openssl \
+    ca-certificates \
+    libasound2 \
+    libudev1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy Binaries
+COPY --from=builder /usr/src/app/target/release/nineballnetallocator /app/allocator
+COPY --from=builder /usr/src/app/target/release/server /app/game_server
+
+RUN chmod +x /app/allocator
+RUN chmod +x /app/game_server
+
+EXPOSE 10000
+
+CMD ["./allocator"]

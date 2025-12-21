@@ -1,0 +1,23 @@
+[package]
+name = "nineballnetallocator"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Add these to existing deps
+tokio-tungstenite = "0.20"
+futures-util = "0.3"
+axum = {version = "0.7", features = ["ws"]}
+tokio = { version = "1.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.0", features = ["v4"] }
+# "shlex" helps safely escape shell arguments
+shlex = "1.2"
+
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Environment variable support
+dotenvy = "0.15"
+# Process management
+sysinfo = "0.30" # Optional, but good for deeper monitoring if needed later

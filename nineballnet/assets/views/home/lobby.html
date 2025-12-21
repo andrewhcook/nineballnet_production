@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-12">
+    <div id="lobby-ui" class="max-w-md mx-auto bg-white dark:bg-gray-800 rounded-lg shadow-xl p-8 text-center border border-gray-200 dark:border-gray-700">
+        <h1 class="text-3xl font-bold mb-4 text-gray-900 dark:text-white">Matchmaking</h1>
+        
+        <div id="status-container" class="mb-8">
+            <p id="status-text" class="text-gray-600 dark:text-gray-400 text-lg">
+                Ready to find a game?
+            </p>
+            <div id="loader" class="hidden mt-4 justify-center">
+                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+            </div>
+        </div>
+
+        <button id="find-match-btn" 
+                onclick="handleFindMatch()"
+                class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition duration-200 ease-in-out transform hover:scale-105 shadow-md">
+            Find Match
+        </button>
+    </div>
+
+    <div id="game-view" class="hidden fixed inset-0 bg-black z-50 flex items-center justify-center">
+        <canvas id="nineball-canvas" class="max-w-full max-h-full shadow-2xl"></canvas>
+        <div id="overlay-status" class="absolute top-4 left-4 text-white bg-black bg-opacity-50 px-3 py-1 rounded text-sm font-mono">
+            Initializing Wasm Engine...
+        </div>
+    </div>
+</div>
+
+<script type="module">
+    // We assume your wasm-pack build is in assets/static/pkg/
+    // Adjust the path below if your build output is named differently
+        const userToken = "{{ token }}";
+    import init, { run_game } from '/nineball_wasm.js';
+
+    let isPolling = false;
+
+    async function handleFindMatch() {
+        const btn = document.getElementById('find-match-btn');
+        const statusText = document.getElementById('status-text');
+        const loader = document.getElementById('loader');
+
+        // UI Update
+        btn.classList.add('hidden');
+        loader.classList.remove('hidden');
+        statusText.innerText = "Searching for an available match server...";
+
+        try {
+            // 1. Tell Loco to start the matchmaking worker
+            const response = await fetch('/api/matchmaking/find', {
+    method: 'POST',
+    headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${userToken}` // Make sure userToken is defined
+    },
+    body: JSON.stringify({ /* your search params */ })
+});
+
+            if (!response.ok) throw new Error("Could not start matchmaking");
+
+            // 2. Begin polling the status endpoint
+            startPolling();
+        } catch (err) {
+            console.error(err);
+            statusText.innerText = "Error starting matchmaking. Try again.";
+            btn.classList.remove('hidden');
+            loader.classList.add('hidden');
+        }
+    }
+
+    function startPolling() {
+        if (isPolling) return;
+        isPolling = true;
+
+        const poll = async () => {
+            try {
+                const response = await fetch('/api/matchmaking/status');
+                
+                // If it's a 200 and has content
+                if (response.ok) {
+                    const text = await response.text();
+                    
+                    // The backend returns the string "searching" if not ready
+                    if (text === "searching") {
+                        setTimeout(poll, 1500); // Check again in 1.5s
+                    } else {
+                        // It's JSON! The match is found.
+                        const ticket = JSON.parse(text);
+                        handleMatchFound(ticket);
+                    }
+                }
+            } catch (err) {
+                console.warn("Polling error, retrying...", err);
+                setTimeout(poll, 3000);
+            }
+        };
+
+        poll();
+    }
+
+    async function handleMatchFound(ticket) {
+        console.log("Match Found! Handoff Ticket:", ticket);
+        
+        const overlay = document.getElementById('overlay-status');
+        const gameView = document.getElementById('game-view');
+
+        // Show the game container
+        gameView.classList.remove('hidden');
+        
+        try {
+            // 3. Initialize Wasm
+            await init(); 
+            
+            overlay.innerText = "Connecting to Game Server...";
+
+            // 4. Hand off to the Wasm engine
+            // Parameters: canvas_id, gateway_url, handoff_token
+            run_game("nineball-canvas", ticket.gateway_url, ticket.handoff_token);
+
+            overlay.classList.add('hidden'); // Hide status once game takes over
+        } catch (err) {
+            console.error("Wasm failure:", err);
+            overlay.innerText = "Failed to launch Wasm Engine.";
+        }
+    }
+
+    // Attach to window for the onclick handler
+    window.handleFindMatch = handleFindMatch;
+</script>
+{% endblock %}

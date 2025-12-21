@@ -1,0 +1,33 @@
+/* tslint:disable */
+/* eslint-disable */
+export const memory: WebAssembly.Memory;
+export const run_game: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+export const wgpu_render_bundle_draw: (a: number, b: number, c: number, d: number, e: number) => void;
+export const wgpu_render_bundle_draw_indexed: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+export const wgpu_render_bundle_set_pipeline: (a: number, b: bigint) => void;
+export const wgpu_render_bundle_draw_indirect: (a: number, b: bigint, c: bigint) => void;
+export const wgpu_render_bundle_set_bind_group: (a: number, b: number, c: bigint, d: number, e: number) => void;
+export const wgpu_render_bundle_set_vertex_buffer: (a: number, b: number, c: bigint, d: bigint, e: bigint) => void;
+export const wgpu_render_bundle_set_push_constants: (a: number, b: number, c: number, d: number, e: number) => void;
+export const wgpu_render_bundle_draw_indexed_indirect: (a: number, b: bigint, c: bigint) => void;
+export const wgpu_render_bundle_insert_debug_marker: (a: number, b: number) => void;
+export const wgpu_render_bundle_pop_debug_group: (a: number) => void;
+export const wgpu_render_bundle_set_index_buffer: (a: number, b: bigint, c: number, d: bigint, e: bigint) => void;
+export const wgpu_render_bundle_push_debug_group: (a: number, b: number) => void;
+export const wasm_bindgen__convert__closures_____invoke__hdc50abbc6fd96c88: (a: number, b: number, c: any) => void;
+export const wasm_bindgen__closure__destroy__h863583fc9c0a8f47: (a: number, b: number) => void;
+export const wasm_bindgen__convert__closures_____invoke__h0b31becf2dbfa930: (a: number, b: number, c: any) => void;
+export const wasm_bindgen__closure__destroy__h7ed1309202238d36: (a: number, b: number) => void;
+export const wasm_bindgen__convert__closures_____invoke__h2cddddb2f47e1c01: (a: number, b: number, c: any) => void;
+export const wasm_bindgen__closure__destroy__h06260a074dddb4af: (a: number, b: number) => void;
+export const wasm_bindgen__convert__closures_____invoke__hb010330ca4f65e30: (a: number, b: number) => void;
+export const wasm_bindgen__convert__closures_____invoke__h2e58efdfd8f0419d: (a: number, b: number, c: any, d: any) => void;
+export const wasm_bindgen__convert__closures_____invoke__hb420378a1b45f93d: (a: number, b: number) => void;
+export const wasm_bindgen__closure__destroy__h6daec15bff865769: (a: number, b: number) => void;
+export const __wbindgen_malloc: (a: number, b: number) => number;
+export const __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+export const __externref_table_alloc: () => number;
+export const __wbindgen_externrefs: WebAssembly.Table;
+export const __wbindgen_exn_store: (a: number) => void;
+export const __wbindgen_free: (a: number, b: number, c: number) => void;
+export const __wbindgen_start: () => void;

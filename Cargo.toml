@@ -1,0 +1,10 @@
+[workspace]
+resolver = "2"
+members = [
+    "nineballnet",
+    "nineballnetallocator",
+    "nine_ball_game"  # <-- ADD THIS
+]
+
+[workspace.dependencies]
+loco-rs = { version = "0.16" }

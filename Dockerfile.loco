@@ -1,0 +1,30 @@
+FROM rust:1-slim-bookworm as builder
+
+# 1. Set the Workspace Root
+WORKDIR /usr/src/app
+RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+
+# 2. Copy EVERYTHING
+COPY . .
+
+# 3. THE FIX: Create a Symlink
+# If the compiler looks for "/usr/src/app/src", we redirect it to "/usr/src/app/nineballnet/src"
+# This satisfies the macro regardless of where Cargo thinks it is running.
+RUN ln -sf nineballnet/src src
+
+# 4. Build from the Root
+# We use "-p nineballnet" to specify the package.
+RUN cargo build --release -p nineballnet --bin nineballnet-cli
+
+# --- Runtime Stage ---
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY --from=builder /usr/src/app/target/release/nineballnet-cli /app/nineballnet_api
+COPY --from=builder /usr/src/app/nineballnet/config /app/config
+
+# Copy the client assets you just restored (if you want them served)
+COPY --from=builder /usr/src/app/nineballnet/assets /app/assets
+
+CMD ["./nineballnet_api", "start"]

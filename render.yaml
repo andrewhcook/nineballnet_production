@@ -1,0 +1,75 @@
+services:
+  # --- 1. Redis (Moved here from 'databases') ---
+  - type: redis
+    name: nineballnet-redis
+    plan: free # 'free' tier for Redis
+    ipAllowList: [] # Allow internal connections only
+
+  # --- 2. Allocator + Game Server ---
+  - type: web
+    name: allocator-srv
+    runtime: docker
+    dockerfilePath: ./Dockerfile.allocator
+    plan: starter
+    envVars:
+      - key: RUST_LOG
+        value: info
+
+  # --- 3. Loco API (nineballnet) ---
+  - type: web
+    name: nineballnet-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile.loco
+    plan: starter
+    numInstances: 1
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: nineballnet-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: nineballnet-redis
+          property: connectionString
+      - key: ALLOCATOR_URL
+        value: http://allocator-srv:3000
+      - key: LOCO_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+    dockerCommand: "./nineballnet_api start"
+
+  # --- 4. Loco Worker (nineballnet) ---
+  - type: worker
+    name: nineballnet-worker
+    runtime: docker
+    dockerfilePath: ./Dockerfile.loco
+    plan: starter
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: nineballnet-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: nineballnet-redis
+          property: connectionString
+      - key: ALLOCATOR_URL
+        value: http://allocator-srv:3000
+      - key: LOCO_ENV
+        value: production
+      - key: JWT_SECRET
+        fromService:
+          type: web
+          name: nineballnet-api
+          envVarKey: JWT_SECRET
+    dockerCommand: "./nineballnet_api workers start"
+
+# --- Databases (Postgres Only) ---
+databases:
+  - name: nineballnet-db
+    plan: free
+    databaseName: nineballnet
+    user: nineball_user
