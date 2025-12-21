@@ -1,0 +1,80 @@
+# Loco Production Configuration for Render
+logger:
+  enable: true
+  pretty_backtrace: true
+  level: info
+  format: json
+
+server:
+  # Render automatically sets the PORT env var. Default to 3000 if missing.
+  port: {{ get_env(name="PORT", default=3000) }}
+  # MUST be 0.0.0.0 to receive traffic from Render's load balancer
+  binding: "0.0.0.0"
+  host: "0.0.0.0"
+  middlewares:
+    static:
+        enable: true
+        must_exist: true
+        folder:
+          uri: "/"                      # Serves files at root (e.g. /nineball.js)
+          path: "assets/static/pkg"     # The folder on disk you confirmed
+        fallback: "assets/static/pkg/index.html"
+    # Compresses responses (gzip) for speed
+    compression:
+      enable: true
+    # Essential for security
+    etag:
+      enable: true
+    limit_payload:
+      enable: true
+      body_limit: 5mb
+    # CORS: Allow your frontend (game client) to talk to the API
+    cors:
+      enable: true
+      # In strict production, replace '*' with your actual frontend URL
+      allow_origins:
+        - "*"
+      allow_methods:
+        - GET
+        - POST
+        - PUT
+        - DELETE
+      allow_headers:
+        - Content-Type
+        - Authorization
+
+# Worker Configuration
+workers:
+  # 'BackgroundQueue' forces Loco to use Redis/Sidekiq
+  mode: BackgroundQueue
+
+# Database Configuration
+database:
+  # Render provides the internal connection string as DATABASE_URL
+  uri: {{ get_env(name="DATABASE_URL") }}
+  enable_logging: false
+  min_connections: 1
+  max_connections: 20
+  auto_migrate: true
+  dangerously_truncate: false
+  dangerously_recreate: false
+  connect_timeout: 2000
+  idle_timeout: 2000
+
+# Queue (Redis) Configuration
+queue:
+  kind: Redis
+  # Render provides the internal connection string as REDIS_URL
+  uri: {{ get_env(name="REDIS_URL") }}
+  dangerously_flush: false
+
+# Authentication / JWT
+# Authentication / JWT
+auth:
+  jwt:
+    secret: {{ get_env(name="JWT_SECRET") }}
+    expiration: 604800 # 7 days
+    # This structure is required for the 'Cookie' variant
+    location:
+      from: Cookie
+      name: token
