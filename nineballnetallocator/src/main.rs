@@ -30,8 +30,9 @@ let state = Arc::new(AppState {
         .with_state(state);
 
     // Render requires binding to 0.0.0.0
-    let addr = std::net::SocketAddr::from(([0, 0, 0, 0], 3000));
-    println!("Allocator Proxy listening on {}", addr);
+    // Change 3000 to 10000
+let addr = std::net::SocketAddr::from(([0, 0, 0, 0], 10000));
+println!("Allocator Proxy listening on {}", addr);
     
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
@@ -152,7 +153,7 @@ struct AppState {
 }
 
 // --- API DTOs ---
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 struct AllocateRequest {
     match_id: String,
     p1_token: String,
@@ -249,18 +250,18 @@ async fn allocate_server(
             servers.insert(port, ServerProcess {
                 child,
                 started_at: Instant::now(),
-                match_id: payload.match_id,
+                match_id: payload.clone().match_id.clone(),
             });
 
             // 4. Return Connection Info
             // Returns: ws://203.0.113.45:8001
-            let connect_url = format!("ws://{}:{}", state.public_host, port);
-            
-            (StatusCode::OK, Json(AllocateResponse {
-                connect_url,
-                port,
-                node_id: "allocator-01".to_string(),
-            })).into_response()
+           let connect_url = format!("wss://{}/play/{}", state.public_host, payload.match_id);
+
+           (StatusCode::OK, Json(AllocateResponse {
+            connect_url,
+            port,
+            node_id: "allocator-01".to_string(),
+        })).into_response()
         },
         Err(e) => {
             error!("Failed to spawn game binary: {}", e);
