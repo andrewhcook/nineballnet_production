@@ -125,22 +125,14 @@ fn assign_players_to_connections(
     }
 }
 
-fn setup_physics_for_nine_ball(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>,   mut materials: ResMut<Assets<StandardMaterial>>, mut fonts: ResMut<Assets<Font>>, ) {
+fn setup_physics_for_nine_ball(mut commands: Commands  ) {
 
-    commands.spawn(ShotPower(0.0, true)).insert(Sensor);
-
-    commands.spawn(TargetBallTorus)
-    .insert(MaterialMeshBundle{mesh: meshes.add(TARGET_BALL_TORUS_DIMENSIONS), material: materials.add(StandardMaterial::from_color(Color::Hsla(Hsla::new(30.0 ,0.60, 0.20, 1.0)))), ..default()});
-
-commands.spawn(TargetBallTorus)
-.insert(MaterialMeshBundle{mesh: meshes.add(TARGET_BALL_TORUS_DIMENSIONS), material: materials.add(StandardMaterial::from_color(Color::Hsla(Hsla::new(30.0 ,0.60, 0.20, 1.0)))), ..default()});
-
+    
 /* Create the ground. */
     commands
     .spawn(RigidBody::Fixed)
         .insert(Collider::cuboid(TABLE_WIDTH, 0.0, TABLE_LENGTH))
       //  .insert(Friction{coefficient: FRICTION_COEFF, combine_rule: CoefficientCombineRule::Average})
-      .insert(MaterialMeshBundle {mesh: meshes.add(Cuboid::from_corners(Vec3::new(2.25, 0.0, 4.5), Vec3::new(-2.25, 0.0, -4.5))), material: materials.add(StandardMaterial::from_color(Color::Hsla(Hsla::new(120.0 , 0.68, 0.93, 1.0)))), ..default()})
       .insert(Friction::coefficient(TABLE_FRICTION_COEFF))
         .insert(TransformBundle::from(Transform::from_xyz(0.0, 0.0, 0.0)));
 
@@ -149,7 +141,6 @@ commands.spawn(TargetBallTorus)
     .spawn(RigidBody::Fixed)
         .insert(Collider::cuboid(TABLE_WIDTH, 0.0, TABLE_LENGTH))
       //  .insert(Friction{coefficient: FRICTION_COEFF, combine_rule: CoefficientCombineRule::Average})
-      .insert(MaterialMeshBundle {mesh: meshes.add(Cuboid::from_corners(Vec3::new(12.25, 0.0, 14.5), Vec3::new(-12.25, 0.0, -14.5))), material: materials.add(StandardMaterial::from_color(Color::Hsla(Hsla::new(120.0 , 0.68, 0.93, 1.0)))), ..default()})
       .insert(Friction::coefficient(TABLE_FRICTION_COEFF))
         .insert(TransformBundle::from(Transform::from_xyz(0.0, 3.0, 0.0)));
 
@@ -157,40 +148,34 @@ commands.spawn(TargetBallTorus)
     commands
     .spawn(RigidBody::Fixed)
     .insert(Collider::cuboid(WALL_DIMENSIONS.half_size.x, WALL_DIMENSIONS.half_size.y, WALL_DIMENSIONS.half_size.z))
-    .insert(MaterialMeshBundle {mesh: meshes.add(WALL_MESH_DIMENSIONS), material: materials.add(StandardMaterial::from_color(Color::Hsla(Hsla::new(30.0 ,0.60, 0.20, 1.0)))), ..default()})
     .insert(TransformBundle::from_transform(Transform::from_translation(Vec3::new(TABLE_WIDTH, 0.0, TABLE_WIDTH))))
     .insert(Restitution {coefficient: 1.0, combine_rule: CoefficientCombineRule::Max});
 
     commands
     .spawn(RigidBody::Fixed)
     .insert(Collider::cuboid(WALL_DIMENSIONS.half_size.x, WALL_DIMENSIONS.half_size.y, WALL_DIMENSIONS.half_size.z))
-    .insert(MaterialMeshBundle {mesh: meshes.add(WALL_MESH_DIMENSIONS), material: materials.add(StandardMaterial::from_color(Color::Hsla(Hsla::new(30.0 ,0.60, 0.20, 1.0)))), ..default()})
     .insert(TransformBundle::from_transform(Transform::from_translation(Vec3::new(TABLE_WIDTH, 0.0, -TABLE_WIDTH))))
 .insert(Friction::coefficient(FRICTION_COEFF))
 .insert(Restitution {coefficient: 1.0, combine_rule: CoefficientCombineRule::Max});
 commands
     .spawn(RigidBody::Fixed)
     .insert(Collider::cuboid(WALL_DIMENSIONS.half_size.x, WALL_DIMENSIONS.half_size.y, WALL_DIMENSIONS.half_size.z))
-    .insert(MaterialMeshBundle {mesh: meshes.add(WALL_MESH_DIMENSIONS), material: materials.add(StandardMaterial::from_color(Color::Hsla(Hsla::new(30.0 ,0.60, 0.20, 1.0)))), ..default()})
     .insert(TransformBundle::from_transform(Transform::from_translation(Vec3::new(-TABLE_WIDTH, 0.0, TABLE_WIDTH))))
     .insert(Restitution {coefficient: 1.0, combine_rule: CoefficientCombineRule::Max});
 
     commands
     .spawn(RigidBody::Fixed)
     .insert(Collider::cuboid(WALL_DIMENSIONS.half_size.x, WALL_DIMENSIONS.half_size.y, WALL_DIMENSIONS.half_size.z))
-    .insert(MaterialMeshBundle {mesh: meshes.add(WALL_MESH_DIMENSIONS), material: materials.add(StandardMaterial::from_color(Color::Hsla(Hsla::new(30.0 ,0.60, 0.20, 1.0)))), ..default()})
     .insert(TransformBundle::from_transform(Transform::from_translation(Vec3::new(-TABLE_WIDTH, 0.0, -TABLE_WIDTH))))
     .insert(Restitution {coefficient: 1.0, combine_rule: CoefficientCombineRule::Max});
     commands
     .spawn(RigidBody::Fixed)
     .insert(Collider::cuboid(WALL_DIMENSIONS.half_size.z, WALL_DIMENSIONS.half_size.y, WALL_DIMENSIONS.half_size.x))
-    .insert(MaterialMeshBundle {mesh: meshes.add(BACK_WALL_MESH_DIMENSIONS), material: materials.add(StandardMaterial::from_color(Color::Hsla(Hsla::new(30.0 ,0.60, 0.20, 1.0)))), ..default()})
     .insert(TransformBundle::from_transform(Transform::from_translation(Vec3::new(0.0, 0.0, -TABLE_LENGTH))))
     .insert(Restitution {coefficient: 1.0, combine_rule: CoefficientCombineRule::Max});
     commands
     .spawn(RigidBody::Fixed)
     .insert(Collider::cuboid(WALL_DIMENSIONS.half_size.z, WALL_DIMENSIONS.half_size.y, WALL_DIMENSIONS.half_size.x))
-    .insert(MaterialMeshBundle {mesh: meshes.add(BACK_WALL_MESH_DIMENSIONS), material: materials.add(StandardMaterial::from_color(Color::Hsla(Hsla::new(30.0 ,0.60, 0.20, 1.0)))), ..default()})
     .insert(TransformBundle::from_transform(Transform::from_translation(Vec3::new(0.0, 0.0, TABLE_LENGTH))))
     .insert(Restitution {coefficient: 1.0, combine_rule: CoefficientCombineRule::Max});
 
@@ -201,7 +186,6 @@ commands
     /* Create the cue ball. */
     commands
         .spawn(RigidBody::Dynamic)
-        .insert(MaterialMeshBundle {mesh: meshes.add(Sphere::new(CUE_BALL_RADIUS)), material: materials.add(StandardMaterial::from_color(Color::WHITE)), ..default()})
         .insert(Collider::ball(CUE_BALL_RADIUS))
         .insert(BALL_RESTITUTION)
         //.insert(ColliderMassProperties::Mass(0.40))
@@ -218,7 +202,6 @@ commands
     // Create the pool balls
     commands
     .spawn(RigidBody::Dynamic)
-    .insert(MaterialMeshBundle {mesh: meshes.add(Sphere::new(STANDARD_BALL_RADIUS)), material: materials.add(StandardMaterial::from_color(Color::hsl(60.0, 1.0, 0.75))), ..default()})
     .insert(Collider::ball(STANDARD_BALL_RADIUS))
     .insert(BALL_RESTITUTION)
     .insert(PoolBalls(9))
@@ -230,7 +213,6 @@ commands
 
 commands
     .spawn(RigidBody::Dynamic)
-    .insert(MaterialMeshBundle {mesh: meshes.add(Sphere::new(STANDARD_BALL_RADIUS)), material: materials.add(StandardMaterial::from_color(Color::hsl(270.0, 1.0, 0.5))), ..default()})
     .insert(Collider::ball(STANDARD_BALL_RADIUS))
     .insert(BALL_RESTITUTION)
     .insert(PoolBalls(4))
@@ -242,7 +224,6 @@ commands
 
     commands
     .spawn(RigidBody::Dynamic)
-    .insert(MaterialMeshBundle {mesh: meshes.add(Sphere::new(STANDARD_BALL_RADIUS)), material: materials.add(StandardMaterial::from_color(Color::hsl(30.0, 1.0, 0.5))), ..default()})
     .insert(Collider::ball(STANDARD_BALL_RADIUS))
     .insert(BALL_RESTITUTION)
     .insert(PoolBalls(5))
@@ -254,7 +235,6 @@ commands
 
     commands
     .spawn(RigidBody::Dynamic)
-    .insert(MaterialMeshBundle {mesh: meshes.add(Sphere::new(STANDARD_BALL_RADIUS)), material: materials.add(StandardMaterial::from_color(Color::hsl(240.0, 1.0, 0.5))), ..default()})
     .insert(Collider::ball(STANDARD_BALL_RADIUS))
     .insert(BALL_RESTITUTION)
     .insert(PoolBalls(2))
@@ -266,7 +246,6 @@ commands
 
     commands
     .spawn(RigidBody::Dynamic)
-    .insert(MaterialMeshBundle {mesh: meshes.add(Sphere::new(STANDARD_BALL_RADIUS)), material: materials.add(StandardMaterial::from_color(Color::hsl(0.0, 1.0, 0.5))), ..default()})
     .insert(Collider::ball(STANDARD_BALL_RADIUS))
     .insert(BALL_RESTITUTION)
     .insert(PoolBalls(3))
@@ -278,7 +257,6 @@ commands
 
     commands
     .spawn(RigidBody::Dynamic)
-    .insert(MaterialMeshBundle {mesh: meshes.add(Sphere::new(STANDARD_BALL_RADIUS)), material: materials.add(StandardMaterial::from_color(Color::hsl(120.0, 1.0, 0.5))), ..default()})
     .insert(Collider::ball(STANDARD_BALL_RADIUS))
     .insert(BALL_RESTITUTION)
     .insert(PoolBalls(6))
@@ -290,7 +268,6 @@ commands
 
     commands
     .spawn(RigidBody::Dynamic)
-    .insert(MaterialMeshBundle {mesh: meshes.add(Sphere::new(STANDARD_BALL_RADIUS)), material: materials.add(StandardMaterial::from_color(Color::hsl(300.0, 1.0, 0.25))), ..default()})
     .insert(Collider::ball(STANDARD_BALL_RADIUS))
     .insert(BALL_RESTITUTION)
     .insert(PoolBalls(7))
@@ -302,7 +279,6 @@ commands
 
 commands
     .spawn(RigidBody::Dynamic)
-    .insert(MaterialMeshBundle {mesh: meshes.add(Sphere::new(STANDARD_BALL_RADIUS)), material: materials.add(StandardMaterial::from_color(Color::hsl(60.0, 1.0, 0.5))), ..default()})
     .insert(Collider::ball(STANDARD_BALL_RADIUS))
     .insert(BALL_RESTITUTION)
     .insert(PoolBalls(1))
@@ -314,7 +290,6 @@ commands
 
 commands
 .spawn(RigidBody::Dynamic)
-.insert(MaterialMeshBundle {mesh: meshes.add(Sphere::new(STANDARD_BALL_RADIUS)), material: materials.add(StandardMaterial::from_color(Color::hsl(0.0, 0.0, 0.0))), ..default()})
 .insert(Collider::ball(STANDARD_BALL_RADIUS))
 .insert(BALL_RESTITUTION)
 .insert(PoolBalls(8))
@@ -329,8 +304,6 @@ commands
 
 fn handle_client_messages(
     mut commands: Commands, 
-    mut meshes: ResMut<Assets<Mesh>>,   
-    mut materials: ResMut<Assets<StandardMaterial>>,
     mut inbound: ResMut<BrowserInbound>,
     mut cue_ball_query: Query<(&mut Velocity, &mut Transform), With<CueBall>>,
     player_query: Query<&Player>,
@@ -387,7 +360,6 @@ fn handle_client_messages(
                      } else {
                         // (Cue ball spawn logic)
                         commands.spawn(RigidBody::Dynamic)
-                            .insert(MaterialMeshBundle {mesh: meshes.add(Sphere::new(STANDARD_BALL_RADIUS)), material: materials.add(StandardMaterial::from_color(Color::WHITE)), ..default()})
                             .insert(Collider::ball(CUE_BALL_RADIUS))
                             .insert(BALL_RESTITUTION)
                             .insert(TransformBundle::from_transform(Transform::from_translation(position)))
@@ -699,7 +671,7 @@ fn set_correct_object_ball_after_shot_in_nine_ball(ball_query: Query<&PoolBalls>
 
 } */
 
-fn computer_ball_in_hand(mut commands: Commands, cue_ball_query: Query<Entity, With<CueBall>>, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>, mut set_state: ResMut<NextState<GamePhase>>) {
+fn computer_ball_in_hand(mut commands: Commands, cue_ball_query: Query<Entity, With<CueBall>>,  mut set_state: ResMut<NextState<GamePhase>>) {
     
     if let Ok(cue_ball_entity) = cue_ball_query.get_single() {
         commands.entity(cue_ball_entity).despawn();
@@ -707,7 +679,6 @@ fn computer_ball_in_hand(mut commands: Commands, cue_ball_query: Query<Entity, W
 
     commands
         .spawn(RigidBody::Dynamic)
-        .insert(MaterialMeshBundle {mesh: meshes.add(Sphere::new(STANDARD_BALL_RADIUS)), material: materials.add(StandardMaterial::from_color(Color::WHITE)), ..default()})
         .insert(Collider::ball(CUE_BALL_RADIUS))
         .insert(BALL_RESTITUTION)
         //.insert(ColliderMassProperties::Mass(0.40))
