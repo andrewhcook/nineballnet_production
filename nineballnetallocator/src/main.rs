@@ -237,7 +237,7 @@ async fn allocate_server(
             "--port", &port.to_string(),
             "--p1-token", &payload.p1_token,
             "--p2-token", &payload.p2_token,
-            // If your game server supports a "--headless" or "--server" flag, add it here
+            "--match-id", &payload.match_id,
         ])
         // Inherit logs so we can see game server output in the Allocator's console
         .stdout(std::process::Stdio::inherit())
