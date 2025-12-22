@@ -2,6 +2,7 @@
 mod ws_gateway;
 
 use bevy::prelude::*;
+use bevy::scene::ScenePlugin;
 use bevy_rapier3d::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::from_slice;
@@ -35,15 +36,18 @@ fn main() {
            scaled_shape_subdivision: 2, 
            force_update_from_transform_changes: false, 
        });
-       app.init_asset::<Mesh>();
-    app.init_asset::<Scene>();
 
-    // FIX: Listen on port 8000 to match the client's expectation
-    let (inbound, outbound, map) = start_ws_gateway("0.0.0.0:8000".to_string());
+
+       app.add_plugins((
+        TransformPlugin::default(), // Position/Rotation (Crucial for Physics!)
+        ScenePlugin::default(),     // Scenes/SceneSpawner (The error you just saw)
+        bevy::log::LogPlugin::default(), // So you can actually see the errors in console
+    ));
+    app.init_asset::<Mesh>();
+    app.init_asset::<Scene>();
+    app.init_asset::<StandardMaterial>();
     
-    app.insert_resource(inbound)
-       .insert_resource(outbound)
-       .insert_resource(map)
+       app
        .insert_state(WhoseMove::Player1)
        .insert_state(GamePhase::PreShot);
 
@@ -52,12 +56,9 @@ fn main() {
        .add_systems(Update, handle_client_messages)
        .add_systems(Update, sync_state_to_clients)
        .add_systems(Update, despawn_pocketed_balls);
-
-    println!("Server running on ws://0.0.0.0:8000"); // Updated log
     app.add_plugins(NineBallRuleset);
     app.run();
 }
-use bevy::prelude::*;
 use bevy::log::info; // Required for info! logging
 use std::collections::{HashMap, HashSet}; // Required for assignment logic
 
