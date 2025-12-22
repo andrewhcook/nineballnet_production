@@ -15,7 +15,6 @@ async fn main() {
         .init();
 
     // 2. Load Config
-    let public_host = std::env::var("PUBLIC_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
     
     // Find where you define public_host and ensure it looks like this:
 let state = Arc::new(AppState {
@@ -23,6 +22,11 @@ let state = Arc::new(AppState {
     // Render provides this system variable automatically
     public_host: std::env::var("RENDER_EXTERNAL_HOSTNAME").unwrap_or("localhost".into()), 
 });
+
+let reaper_state = state.clone();
+    tokio::spawn(async move {
+        run_reaper(reaper_state).await;
+    });
 
     let app = Router::new()
         .route("/allocate", post(allocate_server)) // Private: Called by Loco
