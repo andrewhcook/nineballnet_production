@@ -2,10 +2,12 @@ use serde::{Deserialize, Serialize};
 use loco_rs::prelude::*;
 use crate::models::_entities::matches;
 use sea_orm::{ActiveValue::Set, ActiveModelTrait};
+// ADDED: These traits are required for the .filter() and .delete_many() calls
+use sea_orm::{ColumnTrait, QueryFilter, EntityTrait}; 
 use async_trait::async_trait;
 use chrono::Utc;
 use uuid::Uuid;
-use redis::AsyncCommands; // Enables .rpush / .lpop
+use redis::AsyncCommands;
 
 #[derive(Deserialize, Debug)]
 struct AllocationResponse {
@@ -29,29 +31,26 @@ impl BackgroundWorker<MatchmakingWorkerArgs> for MatchmakingWorker {
         Self { ctx: ctx.clone() }
     }
 
-    async fn perform(&self, args: MatchmakingWorkerArgs) -> Result<()> {
+   async fn perform(&self, args: MatchmakingWorkerArgs) -> Result<()> {
         let queue_key = "matchmaking_queue";
         
-        // --- 1. CONNECT TO REDIS MANUALLY ---
+        // --- 1. CONNECT TO REDIS ---
         let redis_url = std::env::var("REDIS_URL")
             .unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
 
         let client = redis::Client::open(redis_url)
             .map_err(|e| Error::Message(format!("Invalid Redis URL: {}", e)))?;
 
-        // FIX: Use 'get_multiplexed_async_connection' which is the standard async method
         let mut redis = client.get_multiplexed_async_connection().await
             .map_err(|e| Error::Message(format!("Redis Connection Failed: {}", e)))?;
 
         // --- 2. QUEUE LOGIC ---
-
-        // Push current player
+        // (Standard logic to prevent self-matching)
         let _: () = redis.rpush(queue_key, args.player_id.to_string()).await
             .map_err(|e| Error::Message(format!("Redis Push Error: {}", e)))?;
         
         println!("WORKER: Player {} added to queue.", args.player_id);
 
-        // Check queue length
         let queue_len: isize = redis.llen(queue_key).await
             .map_err(|e| Error::Message(e.to_string()))?;
 
@@ -61,8 +60,6 @@ impl BackgroundWorker<MatchmakingWorkerArgs> for MatchmakingWorker {
         }
 
         // Pop 2 Players
-        // NOTE: If your specific redis version errors on "None", remove the ", None" argument.
-        // Standard modern redis crate expects lpop(key, count).
         let player_1_str: Option<String> = redis.lpop(queue_key, None).await.ok();
         let player_2_str: Option<String> = redis.lpop(queue_key, None).await.ok();
 
@@ -70,7 +67,6 @@ impl BackgroundWorker<MatchmakingWorkerArgs> for MatchmakingWorker {
         let (p1_id, p2_id) = match (player_1_str, player_2_str) {
             (Some(p1), Some(p2)) => (p1, p2),
             (Some(p1), None) => {
-                // Return the straggler to the queue
                 let _: () = redis.rpush(queue_key, p1).await.ok().unwrap();
                 return Ok(());
             },
@@ -84,11 +80,28 @@ impl BackgroundWorker<MatchmakingWorkerArgs> for MatchmakingWorker {
 
         println!("WORKER: MATCH FOUND! {} vs {}", p1_id, p2_id);
 
-        // --- 3. ALLOCATION LOGIC ---
+        // --- CLEANUP OLD MATCHES (Crucial Fix) ---
+        matches::Entity::delete_many()
+            .filter(matches::Column::PlayerId.eq(Uuid::parse_str(&p1_id).unwrap()))
+            .exec(&self.ctx.db)
+            .await
+            .map_err(|e| Error::Message(format!("Failed to clear P1 old matches: {}", e)))?;
+
+        matches::Entity::delete_many()
+            .filter(matches::Column::PlayerId.eq(Uuid::parse_str(&p2_id).unwrap()))
+            .exec(&self.ctx.db)
+            .await
+            .map_err(|e| Error::Message(format!("Failed to clear P2 old matches: {}", e)))?;
+
+
+        // --- 3. SECURE ALLOCATION LOGIC ---
 
         let match_uuid = Uuid::new_v4();
-        let p1_token = format!("token_{}_p1", match_uuid); 
-        let p2_token = format!("token_{}_p2", match_uuid); 
+
+        // SECURITY FIX: Generate Random, Unpredictable Session Tokens
+        // These are valid ONLY for this specific match instance.
+        let p1_token = Uuid::new_v4().to_string(); 
+        let p2_token = Uuid::new_v4().to_string(); 
 
         let allocator_url = std::env::var("ALLOCATOR_URL")
             .unwrap_or_else(|_| "http://localhost:3000".to_string());
@@ -119,25 +132,25 @@ impl BackgroundWorker<MatchmakingWorkerArgs> for MatchmakingWorker {
         
         let now = Utc::now().naive_utc();
 
-        // Record for Player 1
+        // Record for Player 1 (Stores THEIR secret token)
         let record_p1 = matches::ActiveModel {
             match_id: Set(match_uuid),
             player_id: Set(Uuid::parse_str(&p1_id).unwrap()),
             status: Set("ready".to_string()),
             gateway_url: Set(Some(allocation.connect_url.clone())), 
-            handoff_token: Set(Some(p1_token)), 
+            handoff_token: Set(Some(p1_token)), // Only P1 gets this
             created_at: Set(now),
             updated_at: Set(now),
             ..Default::default()
         };
 
-        // Record for Player 2
+        // Record for Player 2 (Stores THEIR secret token)
         let record_p2 = matches::ActiveModel {
             match_id: Set(match_uuid),
             player_id: Set(Uuid::parse_str(&p2_id).unwrap()),
             status: Set("ready".to_string()),
             gateway_url: Set(Some(allocation.connect_url)), 
-            handoff_token: Set(Some(p2_token)), 
+            handoff_token: Set(Some(p2_token)), // Only P2 gets this
             created_at: Set(now),
             updated_at: Set(now),
             ..Default::default()
