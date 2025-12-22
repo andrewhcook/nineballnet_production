@@ -18,10 +18,10 @@ use bevy::prelude::{Res,State};
 // --- 1. DEFINE RESOURCES ---
 
 #[derive(Resource)]
-pub struct BrowserInbound(pub mpsc::UnboundedReceiver<String>);
+pub struct BrowserInbound(pub mpsc::UnboundedReceiver<Vec<u8>>);
 
 #[derive(Resource)]
-pub struct BrowserOutbound(pub broadcast::Sender<String>);
+pub struct BrowserOutbound(pub broadcast::Sender<Vec<u8>>);
 
 #[derive(Resource)]
 pub struct GameTokens {
@@ -59,7 +59,7 @@ fn main() {
     
     // 2. OUTBOUND (Bevy -> Clients): BROADCAST (One producer, many listeners)
     // Capacity 100 prevents laggy clients from crashing the server
-    let (tx_from_bevy, _) = broadcast::channel::<String>(100);
+    let (tx_from_bevy, _) = broadcast::channel::<Vec<u8>>(100);
 
     // -- B. Start WebSocket Server --
     let port = args.port;
@@ -126,19 +126,18 @@ fn main() {
 }
 
 // --- 4. NETWORK LOGIC ---
-
 #[derive(Clone)]
 struct NetworkState {
-    // Channel to send data TO Bevy
-    to_bevy: mpsc::UnboundedSender<String>,
-    // Channel to subscribe to data FROM Bevy
-    from_bevy_broadcast: broadcast::Sender<String>,
+    // Channel to send data TO Bevy (Client Input)
+    to_bevy: mpsc::UnboundedSender<Vec<u8>>,
+    // Channel to subscribe to data FROM Bevy (Game State Updates)
+    from_bevy_broadcast: broadcast::Sender<Vec<u8>>,
 }
 
 async fn start_network_listener(
     port: u16,
-    tx_to_bevy: mpsc::UnboundedSender<String>,
-    tx_from_bevy: broadcast::Sender<String>,
+    tx_to_bevy: mpsc::UnboundedSender<Vec<u8>>,
+    tx_from_bevy: broadcast::Sender<Vec<u8>>,
 ) {
     let state = NetworkState {
         to_bevy: tx_to_bevy,
@@ -171,29 +170,31 @@ async fn handle_socket(socket: WebSocket, state: NetworkState) {
 
     loop {
         tokio::select! {
-            // 1. INCOMING: Client -> Bevy
+            // 1. INCOMING: Client (WASM) -> Bevy
+            // FIX: Match Binary, not Text!
             Some(msg) = receiver.next() => {
                 match msg {
-                    Ok(Message::Text(text)) => {
-                        // Forward to Bevy
-                        let _ = state.to_bevy.send(text);
+                    Ok(Message::Binary(data)) => {
+                        // Forward raw bytes to Bevy
+                        let _ = state.to_bevy.send(data);
                     }
                     Ok(Message::Close(_)) => break,
+                    // Ignore Text/Ping/Pong
                     _ => {}
                 }
             }
 
-            // 2. OUTGOING: Bevy -> Client
-            // This Recv is unique to this connection!
+            // 2. OUTGOING: Bevy -> Client (WASM)
+            // FIX: Send Binary, not Text!
             Ok(msg) = my_rx.recv() => {
-                if sender.send(Message::Text(msg)).await.is_err() {
+                // 'msg' is already Vec<u8> (Bincode bytes)
+                if sender.send(Message::Binary(msg)).await.is_err() {
                     break;
                 }
             }
         }
     }
 }
-
 use nine_ball_game::{GameState, WhoseMove};
 use nine_ball_game::{TABLE_WIDTH, TABLE_LENGTH, FRICTION_COEFF, TABLE_FRICTION_COEFF, BALL_FRICTION_COEFF, CUE_BALL_RADIUS, STANDARD_BALL_RADIUS};
 // ... Player struct definition
@@ -375,8 +376,16 @@ commands
 }
 
 
+// CHANGE: usize -> u32
 #[derive(Component, PartialEq, PartialOrd, Eq, Ord, Debug, Clone, Copy, Hash)]
-struct PoolBalls(usize);
+struct PoolBalls(u32); 
+
+#[derive(Component)]
+struct FloatingNumber(u32);
+
+// CHANGE: usize -> u32
+#[derive(Resource, Debug, Clone, PartialEq, Eq, Hash)]
+struct PoolBallsOnTable(u32);
 
 #[derive(Component)]
 struct MainWindow;
@@ -387,8 +396,6 @@ struct SecondWindow;
 #[derive(Component)]
 struct CueBall;
 
-#[derive(Component)]
-struct FloatingNumber(usize);
 
 #[derive(Component)]
 struct Aimer;
@@ -733,7 +740,7 @@ fn tabulate_for_nine_ball( mut first_contact: ResMut<NextState<FirstContactHasBe
     let mut change_shooter = true;
     let mut scratch = false;
    
-    let ball_count = ball_query.iter().count();
+    let ball_count = ball_query.iter().count() as u32;
     if ball_count < balls_on_table.0 {
         
         change_shooter = false;
@@ -828,8 +835,6 @@ enum FirstContactHasBeenMade {
     NotYet
 }
 
-#[derive(Resource, Debug, Clone, PartialEq, Eq, Hash)]
-struct PoolBallsOnTable(usize);
 
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash)]
 struct Scratch(bool);
