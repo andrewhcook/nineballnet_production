@@ -36,7 +36,7 @@ pub const CAMERA_HEIGHT: Vec3 = Vec3 {x: 0.0, y: 1.97, z: 0.0};
 // --- Shared Data Protocol ---
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct BallData {
-    pub number: usize,
+    pub number: u32,
     pub position: Vec3,
     pub velocity: Vec3,
     pub rotation: Quat,

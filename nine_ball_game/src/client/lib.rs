@@ -316,7 +316,7 @@ fn render_gamestate(mut commands: Commands, gamestate: Res<GameState>, cue_ball_
             let cue_ball = cue_ball_query.single();
             commands.entity(cue_ball).insert(TransformBundle::from_transform(Transform::from_translation(i.position)));
         } else {
-        if let Some( pool_ball )= pool_ball_query.iter().find(|(entity, pool_ball)| pool_ball.0 == i.number) {
+        if let Some( pool_ball )= pool_ball_query.iter().find(|(entity, pool_ball)| pool_ball.0 as u32 == i.number) {
             commands.entity(pool_ball.0).insert(TransformBundle::from_transform(Transform::from_translation(i.position)));
         }
         }

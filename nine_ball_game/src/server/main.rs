@@ -1,33 +1,97 @@
-// src/server/main.rs
-mod ws_gateway;
-
-use bevy::prelude::*;
+use bevy::state::app::StatesPlugin;
+use bevy::{prelude::*, scene::ScenePlugin};
+use bevy::app::ScheduleRunnerPlugin;
 use bevy_rapier3d::prelude::*;
-use serde::{Deserialize, Serialize};
-use serde_json::from_slice;
-
-use ws_gateway::{start_ws_gateway, BrowserInbound, BrowserOutbound, ConnectionMap, SessionId};
-use nine_ball_game::{
-    *
+use clap::Parser;
+use std::time::Duration;
+use tokio::sync::{mpsc, broadcast};
+use axum::{
+    extract::{ws::{Message, WebSocket, WebSocketUpgrade}},
+    response::IntoResponse,
+    routing::any,
+    Router,
 };
-#[derive(Component)]
-struct Player {
-    id: SessionId,
-    name: String,
-    player_number: WhoseMove
+use futures_util::{StreamExt, SinkExt};
+use std::net::SocketAddr;
+use std::sync::Arc;
+use bevy::prelude::{Res,State};
+// --- 1. DEFINE RESOURCES ---
+
+#[derive(Resource)]
+pub struct BrowserInbound(pub mpsc::UnboundedReceiver<String>);
+
+#[derive(Resource)]
+pub struct BrowserOutbound(pub broadcast::Sender<String>);
+
+#[derive(Resource)]
+pub struct GameTokens {
+    pub p1: String,
+    pub p2: String,
+    pub match_id: String,
 }
 
+// --- 2. CLI ARGUMENTS ---
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    #[arg(long, default_value_t = 8000)]
+    port: u16,
+
+    #[arg(long, default_value = "")]
+    p1_token: String,
+
+    #[arg(long, default_value = "")]
+    p2_token: String,
+
+    #[arg(long, default_value = "")]
+    match_id: String,
+}
+
+// --- 3. MAIN ENTRY POINT ---
 fn main() {
+    let args = Args::parse();
+    println!("Server starting on port {} | P1: {} | P2: {} | match_id: {}", args.port, args.p1_token, args.p2_token, args.match_id);
+
+    // -- A. Setup Channels --
+    
+    // 1. INBOUND (Clients -> Bevy): Standard MPSC (Many inputs, one consumer)
+    let (tx_to_bevy, rx_to_bevy) = mpsc::unbounded_channel();
+    
+    // 2. OUTBOUND (Bevy -> Clients): BROADCAST (One producer, many listeners)
+    // Capacity 100 prevents laggy clients from crashing the server
+    let (tx_from_bevy, _) = broadcast::channel::<String>(100);
+
+    // -- B. Start WebSocket Server --
+    let port = args.port;
+    let tx_to_bevy_clone = tx_to_bevy.clone();
+    let tx_from_bevy_clone = tx_from_bevy.clone();
+
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            start_network_listener(port, tx_to_bevy_clone, tx_from_bevy_clone).await;
+        });
+    });
+
+    // -- C. Setup Bevy App --
     let mut app = App::new();
 
-    app.add_plugins(MinimalPlugins);
-    
-    // Add these back if your game logic relies on them (e.g. Assets, Hierarchy)
-    app.add_plugins(bevy::asset::AssetPlugin::default());
-    app.add_plugins(bevy::hierarchy::HierarchyPlugin::default());
-    app.add_plugins(bevy::state::app::StatesPlugin);
-       app.add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
-       .insert_resource(RapierConfiguration {
+    app.add_plugins(MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(Duration::from_secs_f64(1.0 / 60.0))));
+
+    app.add_plugins((
+        AssetPlugin::default(),
+        HierarchyPlugin::default(),
+        TransformPlugin::default(),
+        ScenePlugin::default(),
+        bevy::log::LogPlugin::default(),
+        StatesPlugin
+    ));
+
+    app.init_asset::<Mesh>();
+    app.init_asset::<Scene>();
+    app.init_asset::<StandardMaterial>();
+
+    app.add_plugins(RapierPhysicsPlugin::<NoUserData>::default()).insert_resource(RapierConfiguration {
            gravity: Vec3::new(0.0, -9.81, 0.0),
            timestep_mode: TimestepMode::Fixed { dt: 1.0 / 60.0, substeps: 1 },
            physics_pipeline_active: true,
@@ -36,111 +100,111 @@ fn main() {
            force_update_from_transform_changes: false, 
        });
 
-    // FIX: Listen on port 8000 to match the client's expectation
-    let (inbound, outbound, map) = start_ws_gateway("0.0.0.0:8000".to_string());
+    // Insert Resources
+    app.insert_resource(BrowserInbound(rx_to_bevy));
+    app.insert_resource(BrowserOutbound(tx_from_bevy)); // Bevy gets the Sender
+    app.insert_resource(GameTokens {
+        p1: args.p1_token,
+        p2: args.p2_token,
+        match_id: args.match_id
+    });
+
+    // Add your game logic
+    // app.add_plugins(server::NineBallServerPlugin); 
+
+    app.init_asset::<Mesh>();
+    app.init_asset::<Scene>();
+    app.init_asset::<StandardMaterial>();
     
-    app.insert_resource(inbound)
-       .insert_resource(outbound)
-       .insert_resource(map)
+       app
        .insert_state(WhoseMove::Player1)
        .insert_state(GamePhase::PreShot);
 
-    app.insert_resource(GameState::default())
-       .add_systems(Update, assign_players_to_connections)
-       .add_systems(Update, handle_client_messages)
-       .add_systems(Update, sync_state_to_clients)
-       .add_systems(Update, despawn_pocketed_balls);
-
-    println!("Server running on ws://0.0.0.0:8000"); // Updated log
+    app.insert_resource(GameState::default());
     app.add_plugins(NineBallRuleset);
     app.run();
 }
-use bevy::prelude::*;
-use bevy::log::info; // Required for info! logging
-use std::collections::{HashMap, HashSet}; // Required for assignment logic
 
-// ... other imports
+// --- 4. NETWORK LOGIC ---
 
-use nine_ball_game::WhoseMove;
+#[derive(Clone)]
+struct NetworkState {
+    // Channel to send data TO Bevy
+    to_bevy: mpsc::UnboundedSender<String>,
+    // Channel to subscribe to data FROM Bevy
+    from_bevy_broadcast: broadcast::Sender<String>,
+}
 
-// ... Player struct definition
-
-// This system tracks connected sessions and assigns the first two to Player1 and Player2.
-fn assign_players_to_connections(
-    mut commands: Commands,
-    connection_map: Res<ConnectionMap>, // The map of active SessionIds
-    player_query: Query<&Player>,    // Query for already existing Player entities
+async fn start_network_listener(
+    port: u16,
+    tx_to_bevy: mpsc::UnboundedSender<String>,
+    tx_from_bevy: broadcast::Sender<String>,
 ) {
-    // 1. Determine which player slots (P1, P2) are currently filled and which connections are active.
-    let mut player_slots: HashMap<WhoseMove, SessionId> = HashMap::new();
-    let mut active_sessions: HashSet<SessionId> = HashSet::new();
+    let state = NetworkState {
+        to_bevy: tx_to_bevy,
+        from_bevy_broadcast: tx_from_bevy,
+    };
 
-    // A. Gather currently assigned players from Bevy ECS
-    for player in player_query.iter() {
-        player_slots.insert(player.player_number.clone(), player.id);
-    }
-    
-    // B. Gather all active connections from the gateway map resource
-    // We use try_lock() because this map is a Mutex protecting shared state outside of Bevy's ECS.
-    if let Ok(guard) = connection_map.0.try_lock() {
-        for (&session_id, _) in guard.iter() {
-            active_sessions.insert(session_id);
-        }
-    }
-    
-    // 2. Identify sessions that are connected but not yet assigned a Player component.
-    // Get all session IDs that already have a Player component.
-    let assigned_session_ids: HashSet<_> = player_slots.values().copied().collect();
+    let app = Router::new()
+        .route("/", any(ws_handler))
+        .with_state(state);
 
-    // Filter active sessions to find those without a Player component.
-    let unassigned_sessions: Vec<SessionId> = active_sessions
-        .into_iter()
-        .filter(|id| !assigned_session_ids.contains(id))
-        .collect();
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    println!("WebSocket Listener bound to {}", addr);
 
-    // 3. Assign the first two unassigned sessions to Player1 and Player2 slots.
-    let available_slots = [WhoseMove::Player1, WhoseMove::Player2];
-    let mut unassigned_iter = unassigned_sessions.into_iter();
-    
-    for player_number in available_slots.iter() {
-        // Only assign if the player slot (Player1 or Player2) is currently vacant
-        if !player_slots.contains_key(player_number) {
-            // Try to pull the next unassigned session
-            if let Some(session_id) = unassigned_iter.next() {
-                let next_player_number = player_number.clone();
-                
-                info!("New player connected: {:?} assigned to {:?}", session_id, next_player_number);
-                
-                // Spawn a new Player entity with the assigned number
-                commands.spawn(Player { 
-                    id: session_id, 
-                    name: format!("Player_{}", if next_player_number == WhoseMove::Player1 { 1 } else { 2 }), 
-                    player_number: next_player_number 
-                });
-            } else {
-                // No more unassigned sessions left, stop checking slots.
-                break;
+    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    axum::serve(listener, app).await.unwrap();
+}
+
+async fn ws_handler(
+    ws: WebSocketUpgrade,
+    axum::extract::State(state): axum::extract::State<NetworkState>,
+) -> impl IntoResponse {
+    ws.on_upgrade(|socket| handle_socket(socket, state))
+}
+
+async fn handle_socket(socket: WebSocket, state: NetworkState) {
+    let (mut sender, mut receiver) = socket.split();
+
+    // Subscribe to the broadcast channel specifically for THIS connection
+    let mut my_rx = state.from_bevy_broadcast.subscribe();
+
+    loop {
+        tokio::select! {
+            // 1. INCOMING: Client -> Bevy
+            Some(msg) = receiver.next() => {
+                match msg {
+                    Ok(Message::Text(text)) => {
+                        // Forward to Bevy
+                        let _ = state.to_bevy.send(text);
+                    }
+                    Ok(Message::Close(_)) => break,
+                    _ => {}
+                }
+            }
+
+            // 2. OUTGOING: Bevy -> Client
+            // This Recv is unique to this connection!
+            Ok(msg) = my_rx.recv() => {
+                if sender.send(Message::Text(msg)).await.is_err() {
+                    break;
+                }
             }
         }
     }
 }
 
-fn setup_physics_for_nine_ball(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>,   mut materials: ResMut<Assets<StandardMaterial>>, mut fonts: ResMut<Assets<Font>>, ) {
+use nine_ball_game::{GameState, WhoseMove};
+use nine_ball_game::{TABLE_WIDTH, TABLE_LENGTH, FRICTION_COEFF, TABLE_FRICTION_COEFF, BALL_FRICTION_COEFF, CUE_BALL_RADIUS, STANDARD_BALL_RADIUS};
+// ... Player struct definition
+fn setup_physics_for_nine_ball(mut commands: Commands  ) {
 
-    commands.spawn(ShotPower(0.0, true)).insert(Sensor);
-
-    commands.spawn(TargetBallTorus)
-    .insert(MaterialMeshBundle{mesh: meshes.add(TARGET_BALL_TORUS_DIMENSIONS), material: materials.add(StandardMaterial::from_color(Color::Hsla(Hsla::new(30.0 ,0.60, 0.20, 1.0)))), ..default()});
-
-commands.spawn(TargetBallTorus)
-.insert(MaterialMeshBundle{mesh: meshes.add(TARGET_BALL_TORUS_DIMENSIONS), material: materials.add(StandardMaterial::from_color(Color::Hsla(Hsla::new(30.0 ,0.60, 0.20, 1.0)))), ..default()});
-
+    
 /* Create the ground. */
     commands
     .spawn(RigidBody::Fixed)
         .insert(Collider::cuboid(TABLE_WIDTH, 0.0, TABLE_LENGTH))
       //  .insert(Friction{coefficient: FRICTION_COEFF, combine_rule: CoefficientCombineRule::Average})
-      .insert(MaterialMeshBundle {mesh: meshes.add(Cuboid::from_corners(Vec3::new(2.25, 0.0, 4.5), Vec3::new(-2.25, 0.0, -4.5))), material: materials.add(StandardMaterial::from_color(Color::Hsla(Hsla::new(120.0 , 0.68, 0.93, 1.0)))), ..default()})
       .insert(Friction::coefficient(TABLE_FRICTION_COEFF))
         .insert(TransformBundle::from(Transform::from_xyz(0.0, 0.0, 0.0)));
 
@@ -149,7 +213,6 @@ commands.spawn(TargetBallTorus)
     .spawn(RigidBody::Fixed)
         .insert(Collider::cuboid(TABLE_WIDTH, 0.0, TABLE_LENGTH))
       //  .insert(Friction{coefficient: FRICTION_COEFF, combine_rule: CoefficientCombineRule::Average})
-      .insert(MaterialMeshBundle {mesh: meshes.add(Cuboid::from_corners(Vec3::new(12.25, 0.0, 14.5), Vec3::new(-12.25, 0.0, -14.5))), material: materials.add(StandardMaterial::from_color(Color::Hsla(Hsla::new(120.0 , 0.68, 0.93, 1.0)))), ..default()})
       .insert(Friction::coefficient(TABLE_FRICTION_COEFF))
         .insert(TransformBundle::from(Transform::from_xyz(0.0, 3.0, 0.0)));
 
@@ -157,40 +220,34 @@ commands.spawn(TargetBallTorus)
     commands
     .spawn(RigidBody::Fixed)
     .insert(Collider::cuboid(WALL_DIMENSIONS.half_size.x, WALL_DIMENSIONS.half_size.y, WALL_DIMENSIONS.half_size.z))
-    .insert(MaterialMeshBundle {mesh: meshes.add(WALL_MESH_DIMENSIONS), material: materials.add(StandardMaterial::from_color(Color::Hsla(Hsla::new(30.0 ,0.60, 0.20, 1.0)))), ..default()})
     .insert(TransformBundle::from_transform(Transform::from_translation(Vec3::new(TABLE_WIDTH, 0.0, TABLE_WIDTH))))
     .insert(Restitution {coefficient: 1.0, combine_rule: CoefficientCombineRule::Max});
 
     commands
     .spawn(RigidBody::Fixed)
     .insert(Collider::cuboid(WALL_DIMENSIONS.half_size.x, WALL_DIMENSIONS.half_size.y, WALL_DIMENSIONS.half_size.z))
-    .insert(MaterialMeshBundle {mesh: meshes.add(WALL_MESH_DIMENSIONS), material: materials.add(StandardMaterial::from_color(Color::Hsla(Hsla::new(30.0 ,0.60, 0.20, 1.0)))), ..default()})
     .insert(TransformBundle::from_transform(Transform::from_translation(Vec3::new(TABLE_WIDTH, 0.0, -TABLE_WIDTH))))
 .insert(Friction::coefficient(FRICTION_COEFF))
 .insert(Restitution {coefficient: 1.0, combine_rule: CoefficientCombineRule::Max});
 commands
     .spawn(RigidBody::Fixed)
     .insert(Collider::cuboid(WALL_DIMENSIONS.half_size.x, WALL_DIMENSIONS.half_size.y, WALL_DIMENSIONS.half_size.z))
-    .insert(MaterialMeshBundle {mesh: meshes.add(WALL_MESH_DIMENSIONS), material: materials.add(StandardMaterial::from_color(Color::Hsla(Hsla::new(30.0 ,0.60, 0.20, 1.0)))), ..default()})
     .insert(TransformBundle::from_transform(Transform::from_translation(Vec3::new(-TABLE_WIDTH, 0.0, TABLE_WIDTH))))
     .insert(Restitution {coefficient: 1.0, combine_rule: CoefficientCombineRule::Max});
 
     commands
     .spawn(RigidBody::Fixed)
     .insert(Collider::cuboid(WALL_DIMENSIONS.half_size.x, WALL_DIMENSIONS.half_size.y, WALL_DIMENSIONS.half_size.z))
-    .insert(MaterialMeshBundle {mesh: meshes.add(WALL_MESH_DIMENSIONS), material: materials.add(StandardMaterial::from_color(Color::Hsla(Hsla::new(30.0 ,0.60, 0.20, 1.0)))), ..default()})
     .insert(TransformBundle::from_transform(Transform::from_translation(Vec3::new(-TABLE_WIDTH, 0.0, -TABLE_WIDTH))))
     .insert(Restitution {coefficient: 1.0, combine_rule: CoefficientCombineRule::Max});
     commands
     .spawn(RigidBody::Fixed)
     .insert(Collider::cuboid(WALL_DIMENSIONS.half_size.z, WALL_DIMENSIONS.half_size.y, WALL_DIMENSIONS.half_size.x))
-    .insert(MaterialMeshBundle {mesh: meshes.add(BACK_WALL_MESH_DIMENSIONS), material: materials.add(StandardMaterial::from_color(Color::Hsla(Hsla::new(30.0 ,0.60, 0.20, 1.0)))), ..default()})
     .insert(TransformBundle::from_transform(Transform::from_translation(Vec3::new(0.0, 0.0, -TABLE_LENGTH))))
     .insert(Restitution {coefficient: 1.0, combine_rule: CoefficientCombineRule::Max});
     commands
     .spawn(RigidBody::Fixed)
     .insert(Collider::cuboid(WALL_DIMENSIONS.half_size.z, WALL_DIMENSIONS.half_size.y, WALL_DIMENSIONS.half_size.x))
-    .insert(MaterialMeshBundle {mesh: meshes.add(BACK_WALL_MESH_DIMENSIONS), material: materials.add(StandardMaterial::from_color(Color::Hsla(Hsla::new(30.0 ,0.60, 0.20, 1.0)))), ..default()})
     .insert(TransformBundle::from_transform(Transform::from_translation(Vec3::new(0.0, 0.0, TABLE_LENGTH))))
     .insert(Restitution {coefficient: 1.0, combine_rule: CoefficientCombineRule::Max});
 
@@ -201,7 +258,6 @@ commands
     /* Create the cue ball. */
     commands
         .spawn(RigidBody::Dynamic)
-        .insert(MaterialMeshBundle {mesh: meshes.add(Sphere::new(CUE_BALL_RADIUS)), material: materials.add(StandardMaterial::from_color(Color::WHITE)), ..default()})
         .insert(Collider::ball(CUE_BALL_RADIUS))
         .insert(BALL_RESTITUTION)
         //.insert(ColliderMassProperties::Mass(0.40))
@@ -218,7 +274,6 @@ commands
     // Create the pool balls
     commands
     .spawn(RigidBody::Dynamic)
-    .insert(MaterialMeshBundle {mesh: meshes.add(Sphere::new(STANDARD_BALL_RADIUS)), material: materials.add(StandardMaterial::from_color(Color::hsl(60.0, 1.0, 0.75))), ..default()})
     .insert(Collider::ball(STANDARD_BALL_RADIUS))
     .insert(BALL_RESTITUTION)
     .insert(PoolBalls(9))
@@ -230,7 +285,6 @@ commands
 
 commands
     .spawn(RigidBody::Dynamic)
-    .insert(MaterialMeshBundle {mesh: meshes.add(Sphere::new(STANDARD_BALL_RADIUS)), material: materials.add(StandardMaterial::from_color(Color::hsl(270.0, 1.0, 0.5))), ..default()})
     .insert(Collider::ball(STANDARD_BALL_RADIUS))
     .insert(BALL_RESTITUTION)
     .insert(PoolBalls(4))
@@ -242,7 +296,6 @@ commands
 
     commands
     .spawn(RigidBody::Dynamic)
-    .insert(MaterialMeshBundle {mesh: meshes.add(Sphere::new(STANDARD_BALL_RADIUS)), material: materials.add(StandardMaterial::from_color(Color::hsl(30.0, 1.0, 0.5))), ..default()})
     .insert(Collider::ball(STANDARD_BALL_RADIUS))
     .insert(BALL_RESTITUTION)
     .insert(PoolBalls(5))
@@ -254,7 +307,6 @@ commands
 
     commands
     .spawn(RigidBody::Dynamic)
-    .insert(MaterialMeshBundle {mesh: meshes.add(Sphere::new(STANDARD_BALL_RADIUS)), material: materials.add(StandardMaterial::from_color(Color::hsl(240.0, 1.0, 0.5))), ..default()})
     .insert(Collider::ball(STANDARD_BALL_RADIUS))
     .insert(BALL_RESTITUTION)
     .insert(PoolBalls(2))
@@ -266,7 +318,6 @@ commands
 
     commands
     .spawn(RigidBody::Dynamic)
-    .insert(MaterialMeshBundle {mesh: meshes.add(Sphere::new(STANDARD_BALL_RADIUS)), material: materials.add(StandardMaterial::from_color(Color::hsl(0.0, 1.0, 0.5))), ..default()})
     .insert(Collider::ball(STANDARD_BALL_RADIUS))
     .insert(BALL_RESTITUTION)
     .insert(PoolBalls(3))
@@ -278,7 +329,6 @@ commands
 
     commands
     .spawn(RigidBody::Dynamic)
-    .insert(MaterialMeshBundle {mesh: meshes.add(Sphere::new(STANDARD_BALL_RADIUS)), material: materials.add(StandardMaterial::from_color(Color::hsl(120.0, 1.0, 0.5))), ..default()})
     .insert(Collider::ball(STANDARD_BALL_RADIUS))
     .insert(BALL_RESTITUTION)
     .insert(PoolBalls(6))
@@ -290,7 +340,6 @@ commands
 
     commands
     .spawn(RigidBody::Dynamic)
-    .insert(MaterialMeshBundle {mesh: meshes.add(Sphere::new(STANDARD_BALL_RADIUS)), material: materials.add(StandardMaterial::from_color(Color::hsl(300.0, 1.0, 0.25))), ..default()})
     .insert(Collider::ball(STANDARD_BALL_RADIUS))
     .insert(BALL_RESTITUTION)
     .insert(PoolBalls(7))
@@ -302,7 +351,6 @@ commands
 
 commands
     .spawn(RigidBody::Dynamic)
-    .insert(MaterialMeshBundle {mesh: meshes.add(Sphere::new(STANDARD_BALL_RADIUS)), material: materials.add(StandardMaterial::from_color(Color::hsl(60.0, 1.0, 0.5))), ..default()})
     .insert(Collider::ball(STANDARD_BALL_RADIUS))
     .insert(BALL_RESTITUTION)
     .insert(PoolBalls(1))
@@ -314,7 +362,6 @@ commands
 
 commands
 .spawn(RigidBody::Dynamic)
-.insert(MaterialMeshBundle {mesh: meshes.add(Sphere::new(STANDARD_BALL_RADIUS)), material: materials.add(StandardMaterial::from_color(Color::hsl(0.0, 0.0, 0.0))), ..default()})
 .insert(Collider::ball(STANDARD_BALL_RADIUS))
 .insert(BALL_RESTITUTION)
 .insert(PoolBalls(8))
@@ -325,131 +372,6 @@ commands
     .insert(TransformBundle::from(Transform::from_xyz(0.0, STANDARD_BALL_RADIUS, TABLE_WIDTH  + 4.0 * STANDARD_BALL_RADIUS))).insert(Ccd::enabled()).insert(ActiveEvents::COLLISION_EVENTS)
     ; 
 
-}
-
-fn handle_client_messages(
-    mut commands: Commands, 
-    mut meshes: ResMut<Assets<Mesh>>,   
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut inbound: ResMut<BrowserInbound>,
-    mut cue_ball_query: Query<(&mut Velocity, &mut Transform), With<CueBall>>,
-    player_query: Query<&Player>,
-    current_turn: Res<State<WhoseMove>>,
-    current_phase: Res<State<GamePhase>>,
-    mut next_phase: ResMut<NextState<GamePhase>>,
-    mut shot_event_writer: EventWriter<ShotMade>,
-) {
-    let current_shooter_number = current_turn.get();
-    
-    while let Ok((session_id, data)) = inbound.0.try_recv() {
-        
-        // Check for the synthetic JOIN message from ws_gateway first
-        if let Ok(json_msg) = from_slice::<serde_json::Value>(&data) {
-             if let Some(token) = json_msg.get("join").and_then(|v| v.as_str()) {
-                 info!("Player joined with token: {} (Session {})", token, session_id);
-                 // TODO: Here you can look up the token in Redis to verify identity
-                 // For now, allow the assign_players_to_connections system to pick them up
-                 continue;
-             }
-        }
-
-        // Standard Game Logic
-        let sender_player = player_query.iter().find(|p| p.id == session_id);
-        
-        if sender_player.is_none() {
-            // If it's not a Join message and they aren't assigned, ignore
-            continue;
-        }
-
-        let sender_player_number = &sender_player.unwrap().player_number;
-
-        if let Ok(msg) = bincode::deserialize::<ClientMessage>(&data) {
-            match msg {
-                ClientMessage::Shot { power, direction, angvel } => {
-                    if current_phase.get() != &GamePhase::PreShot { continue; }
-                    if sender_player_number != current_shooter_number { continue; }
-
-                    if let Ok((mut vel, _)) = cue_ball_query.get_single_mut() {
-                        let impulse = direction.normalize() * power * 1.25;
-                        vel.linvel = impulse;
-                        vel.angvel = angvel;
-                        shot_event_writer.send(ShotMade); 
-                    }
-                }
-                ClientMessage::BallPlacement { position } => {
-                     if current_phase.get() != &GamePhase::BallInHand { continue; }
-                     if sender_player_number != current_shooter_number { continue; }
-
-                     if let Ok((mut vel, mut transform)) = cue_ball_query.get_single_mut() {
-                             transform.translation = position;
-                             vel.linvel = Vec3::ZERO;
-                             vel.angvel = Vec3::ZERO;
-                     } else {
-                        // (Cue ball spawn logic)
-                        commands.spawn(RigidBody::Dynamic)
-                            .insert(MaterialMeshBundle {mesh: meshes.add(Sphere::new(STANDARD_BALL_RADIUS)), material: materials.add(StandardMaterial::from_color(Color::WHITE)), ..default()})
-                            .insert(Collider::ball(CUE_BALL_RADIUS))
-                            .insert(BALL_RESTITUTION)
-                            .insert(TransformBundle::from_transform(Transform::from_translation(position)))
-                            .insert(ColliderMassProperties::Mass(BALL_MASS))
-                            .insert(BALL_DAMPING)
-                            .insert(CueBall)
-                            .insert(Velocity { linvel: Vec3::ZERO, angvel: Vec3::ZERO });
-                    }
-                    next_phase.set(GamePhase::PreShot); 
-                }
-                ClientMessage::Join { .. } => { }
-            }
-        } 
-    }
-}
-
-fn sync_state_to_clients(
-    mut outbound: ResMut<BrowserOutbound>,
-    connection_map: Res<ws_gateway::ConnectionMap>,
-    ball_query: Query<(&Transform, &Velocity, &PoolBalls)>, cue_ball_query: Query<(&Transform, &Velocity, &CueBall)>, phase: Res<State<GamePhase>>,whose_move: Res<State<WhoseMove>>
-) {
-    
-    let mut state = GameState::default();
-    let mut moving = false;
-    
-    for (t, v, b) in ball_query.iter() {
-        if v.linvel.length_squared() > 0.01 || v.angvel.length_squared() > 0.01 {
-            moving = true;
-        }
-        state.balls.push(BallData {
-            number: b.0,
-            position: t.translation,
-            velocity: v.linvel,
-            rotation: t.rotation,
-            is_cue: false,
-        });
-    }
-
-    for (t,v,c) in cue_ball_query.get_single() {
-        if v.linvel.length_squared() > 0.01 || v.angvel.length_squared() > 0.01 {
-            moving = true;
-        }
-        state.balls.push(BallData {
-            number: 0,
-            position: t.translation,
-            velocity: v.linvel,
-            rotation: t.rotation,
-            is_cue: true,
-        });
-    }
-    state.whose_move = whose_move.get().clone();
-    state.phase = phase.get().clone();
-    state.should_show_shot_controls = !moving; 
-
-    if let Ok(bytes) = bincode::serialize(&state) {
-        let map_guard = connection_map.0.try_lock();
-        if let Ok(guard) = map_guard {
-            for (&session_id, _) in guard.iter() {
-                let _ = outbound.0.send((session_id, bytes.clone()));
-            }
-        }
-    }
 }
 
 
@@ -484,9 +406,6 @@ struct CurrentCuePosition;
 struct ShotPower(f32,bool);
 
 const BALL_MASS: f32 = 0.17;
-const TABLE_FRICTION_COEFF: f32 = 1.00;
-const FRICTION_COEFF: f32 = 1.0;
-const BALL_FRICTION_COEFF:f32 = 1.0;
 const BALL_RESTITUTION: Restitution = Restitution::coefficient(1.00);
 const DEFAULT_VELOCITY: Velocity =  Velocity {
     linvel: Vec3::ZERO,
@@ -521,7 +440,8 @@ fn query_target_ball_torus_in_nine_ball(mut commands: Commands, lowest_numbered_
     }
 }
 
-
+#[derive(States, Debug, Clone, PartialEq, Eq, Hash)]
+struct CorrectObjectBall(PoolBalls);
 
 
 pub struct GameMode;
@@ -699,7 +619,7 @@ fn set_correct_object_ball_after_shot_in_nine_ball(ball_query: Query<&PoolBalls>
 
 } */
 
-fn computer_ball_in_hand(mut commands: Commands, cue_ball_query: Query<Entity, With<CueBall>>, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>, mut set_state: ResMut<NextState<GamePhase>>) {
+fn computer_ball_in_hand(mut commands: Commands, cue_ball_query: Query<Entity, With<CueBall>>,  mut set_state: ResMut<NextState<GamePhase>>) {
     
     if let Ok(cue_ball_entity) = cue_ball_query.get_single() {
         commands.entity(cue_ball_entity).despawn();
@@ -707,7 +627,6 @@ fn computer_ball_in_hand(mut commands: Commands, cue_ball_query: Query<Entity, W
 
     commands
         .spawn(RigidBody::Dynamic)
-        .insert(MaterialMeshBundle {mesh: meshes.add(Sphere::new(STANDARD_BALL_RADIUS)), material: materials.add(StandardMaterial::from_color(Color::WHITE)), ..default()})
         .insert(Collider::ball(CUE_BALL_RADIUS))
         .insert(BALL_RESTITUTION)
         //.insert(ColliderMassProperties::Mass(0.40))
@@ -911,9 +830,6 @@ enum FirstContactHasBeenMade {
 
 #[derive(Resource, Debug, Clone, PartialEq, Eq, Hash)]
 struct PoolBallsOnTable(usize);
-
-#[derive(States, Debug, Clone, PartialEq, Eq, Hash)]
-struct CorrectObjectBall(PoolBalls);
 
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash)]
 struct Scratch(bool);
