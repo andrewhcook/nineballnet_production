@@ -35,6 +35,8 @@ fn main() {
            scaled_shape_subdivision: 2, 
            force_update_from_transform_changes: false, 
        });
+       app.init_asset::<Mesh>();
+    app.init_asset::<Scene>();
 
     // FIX: Listen on port 8000 to match the client's expectation
     let (inbound, outbound, map) = start_ws_gateway("0.0.0.0:8000".to_string());
