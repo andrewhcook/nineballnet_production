@@ -39,6 +39,7 @@ fluent-templates = { version = "0.13", features = ["tera"] }
 unic-langid = { version = "0.9" }
 # /view engine
 axum-extra = { version = "0.10", features = ["form"] }
+redis = { version = "1.0.1", features = ["tokio-comp"] }
 
 [[bin]]
 name = "nineballnet-cli" # <--- This defines the binary name
