@@ -27,6 +27,7 @@ pub struct BrowserOutbound(pub broadcast::Sender<String>);
 pub struct GameTokens {
     pub p1: String,
     pub p2: String,
+    pub match_id: String,
 }
 
 // --- 2. CLI ARGUMENTS ---
@@ -41,12 +42,15 @@ struct Args {
 
     #[arg(long, default_value = "")]
     p2_token: String,
+
+    #[arg(long, default_value = "")]
+    match_id: String,
 }
 
 // --- 3. MAIN ENTRY POINT ---
 fn main() {
     let args = Args::parse();
-    println!("Server starting on port {} | P1: {} | P2: {}", args.port, args.p1_token, args.p2_token);
+    println!("Server starting on port {} | P1: {} | P2: {} | match_id: {}", args.port, args.p1_token, args.p2_token, args.match_id);
 
     // -- A. Setup Channels --
     
@@ -102,6 +106,7 @@ fn main() {
     app.insert_resource(GameTokens {
         p1: args.p1_token,
         p2: args.p2_token,
+        match_id: args.match_id
     });
 
     // Add your game logic
