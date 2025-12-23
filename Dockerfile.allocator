@@ -33,6 +33,7 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
+RUN mkdir -p assets
 # Copy Binaries
 COPY --from=builder /usr/src/app/target/release/nineballnetallocator /app/allocator
 COPY --from=builder /usr/src/app/target/release/server /app/game_server
