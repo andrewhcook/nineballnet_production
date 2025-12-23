@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use loco_rs::prelude::*;
 use crate::models::_entities::matches;
 use sea_orm::{ActiveValue::Set, ActiveModelTrait};
-// ADDED: These traits are required for the .filter() and .delete_many() calls
+// CRITICAL IMPORT: Needed for deleting old records
 use sea_orm::{ColumnTrait, QueryFilter, EntityTrait}; 
 use async_trait::async_trait;
 use chrono::Utc;
@@ -31,10 +31,10 @@ impl BackgroundWorker<MatchmakingWorkerArgs> for MatchmakingWorker {
         Self { ctx: ctx.clone() }
     }
 
-   async fn perform(&self, args: MatchmakingWorkerArgs) -> Result<()> {
+    async fn perform(&self, args: MatchmakingWorkerArgs) -> Result<()> {
         let queue_key = "matchmaking_queue";
         
-        // --- 1. CONNECT TO REDIS ---
+        // 1. Connect to Redis
         let redis_url = std::env::var("REDIS_URL")
             .unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
 
@@ -44,8 +44,7 @@ impl BackgroundWorker<MatchmakingWorkerArgs> for MatchmakingWorker {
         let mut redis = client.get_multiplexed_async_connection().await
             .map_err(|e| Error::Message(format!("Redis Connection Failed: {}", e)))?;
 
-        // --- 2. QUEUE LOGIC ---
-        // (Standard logic to prevent self-matching)
+        // 2. Queue Logic
         let _: () = redis.rpush(queue_key, args.player_id.to_string()).await
             .map_err(|e| Error::Message(format!("Redis Push Error: {}", e)))?;
         
@@ -55,16 +54,15 @@ impl BackgroundWorker<MatchmakingWorkerArgs> for MatchmakingWorker {
             .map_err(|e| Error::Message(e.to_string()))?;
 
         if queue_len < 2 {
-            println!("WORKER: Queue length is {}. Waiting for more players.", queue_len);
+            println!("WORKER: Waiting for opponent (Queue: {})", queue_len);
             return Ok(());
         }
 
         // Pop 2 Players
-        let player_1_str: Option<String> = redis.lpop(queue_key, None).await.ok();
-        let player_2_str: Option<String> = redis.lpop(queue_key, None).await.ok();
+        let p1_str: Option<String> = redis.lpop(queue_key, None).await.ok();
+        let p2_str: Option<String> = redis.lpop(queue_key, None).await.ok();
 
-        // Safety Check
-        let (p1_id, p2_id) = match (player_1_str, player_2_str) {
+        let (p1_id, p2_id) = match (p1_str, p2_str) {
             (Some(p1), Some(p2)) => (p1, p2),
             (Some(p1), None) => {
                 let _: () = redis.rpush(queue_key, p1).await.ok().unwrap();
@@ -74,32 +72,30 @@ impl BackgroundWorker<MatchmakingWorkerArgs> for MatchmakingWorker {
         };
 
         if p1_id == p2_id {
-             println!("WORKER: Duplicate player found. Ignoring.");
              return Ok(());
         }
 
         println!("WORKER: MATCH FOUND! {} vs {}", p1_id, p2_id);
 
-        // --- CLEANUP OLD MATCHES (Crucial Fix) ---
+        // --- CRITICAL FIX: CLEANUP OLD MATCHES ---
+        // This deletes any previous "Ready" records for these players.
+        // Without this, the frontend grabs the OLD match (Port 8000) instead of the new one.
         matches::Entity::delete_many()
             .filter(matches::Column::PlayerId.eq(Uuid::parse_str(&p1_id).unwrap()))
             .exec(&self.ctx.db)
             .await
-            .map_err(|e| Error::Message(format!("Failed to clear P1 old matches: {}", e)))?;
+            .map_err(|e| Error::Message(format!("DB Cleanup P1 Failed: {}", e)))?;
 
         matches::Entity::delete_many()
             .filter(matches::Column::PlayerId.eq(Uuid::parse_str(&p2_id).unwrap()))
             .exec(&self.ctx.db)
             .await
-            .map_err(|e| Error::Message(format!("Failed to clear P2 old matches: {}", e)))?;
+            .map_err(|e| Error::Message(format!("DB Cleanup P2 Failed: {}", e)))?;
 
 
-        // --- 3. SECURE ALLOCATION LOGIC ---
-
+        // 3. Allocator Logic
         let match_uuid = Uuid::new_v4();
-
-        // SECURITY FIX: Generate Random, Unpredictable Session Tokens
-        // These are valid ONLY for this specific match instance.
+        // Generate NEW random tokens for this specific match
         let p1_token = Uuid::new_v4().to_string(); 
         let p2_token = Uuid::new_v4().to_string(); 
 
@@ -107,7 +103,6 @@ impl BackgroundWorker<MatchmakingWorkerArgs> for MatchmakingWorker {
             .unwrap_or_else(|_| "http://localhost:3000".to_string());
 
         let http_client = reqwest::Client::new();
-        
         let response = http_client
             .post(format!("{}/allocate", allocator_url))
             .json(&serde_json::json!({
@@ -128,29 +123,26 @@ impl BackgroundWorker<MatchmakingWorkerArgs> for MatchmakingWorker {
         
         println!("WORKER: Server allocated at {}", allocation.connect_url);
 
-        // --- 4. DB UPDATES ---
-        
+        // 4. DB Updates (Insert NEW match)
         let now = Utc::now().naive_utc();
 
-        // Record for Player 1 (Stores THEIR secret token)
         let record_p1 = matches::ActiveModel {
             match_id: Set(match_uuid),
             player_id: Set(Uuid::parse_str(&p1_id).unwrap()),
             status: Set("ready".to_string()),
             gateway_url: Set(Some(allocation.connect_url.clone())), 
-            handoff_token: Set(Some(p1_token)), // Only P1 gets this
+            handoff_token: Set(Some(p1_token)), 
             created_at: Set(now),
             updated_at: Set(now),
             ..Default::default()
         };
 
-        // Record for Player 2 (Stores THEIR secret token)
         let record_p2 = matches::ActiveModel {
             match_id: Set(match_uuid),
             player_id: Set(Uuid::parse_str(&p2_id).unwrap()),
             status: Set("ready".to_string()),
             gateway_url: Set(Some(allocation.connect_url)), 
-            handoff_token: Set(Some(p2_token)), // Only P2 gets this
+            handoff_token: Set(Some(p2_token)), 
             created_at: Set(now),
             updated_at: Set(now),
             ..Default::default()
@@ -159,7 +151,7 @@ impl BackgroundWorker<MatchmakingWorkerArgs> for MatchmakingWorker {
         record_p1.insert(&self.ctx.db).await.map_err(|e| Error::Message(e.to_string()))?;
         record_p2.insert(&self.ctx.db).await.map_err(|e| Error::Message(e.to_string()))?;
 
-        println!("WORKER: DB updated for both players.");
+        println!("WORKER: DB updated.");
         Ok(())
     }
 }
