@@ -36,6 +36,7 @@ WORKDIR /app
 # Copy Binaries
 COPY --from=builder /usr/src/app/target/release/nineballnetallocator /app/allocator
 COPY --from=builder /usr/src/app/target/release/server /app/game_server
+COPY --from=builder /usr/src/app/assets /app/assets
 
 RUN chmod +x /app/allocator
 RUN chmod +x /app/game_server
