@@ -15,6 +15,10 @@ use futures_util::{StreamExt, SinkExt};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use bevy::prelude::{Res,State};
+#[path = "../lib.rs"] 
+mod root_logic;
+use root_logic::ClientMessage;
+
 // --- 1. DEFINE RESOURCES ---
 
 #[derive(Resource)]
@@ -147,11 +151,10 @@ fn handle_incoming_network_messages(
     // The channel we created in main()
     mut inbound: ResMut<BrowserInbound>, 
     // The state we need to update
-    mut game_state: ResMut<GameState>,
     // Optional: Events if you use them to trigger physics
     // mut shot_events: EventWriter<ShotEvent>, 
     mut commands: Commands,
-    mut cue_ball_query: Query<&Entity, With<CueBall>>
+    mut cue_ball_query: Query<Entity, With<CueBall>>
 ) {
     // Loop until the channel is empty for this frame
     while let Ok(bytes) = inbound.0.try_recv() {
@@ -164,15 +167,15 @@ fn handle_incoming_network_messages(
                         // Apply the shot logic directly to the state
                         // OR trigger a physics event
                         println!("Processing shot: Power {}", power);
-                        if let Some(cue_ball) = cue_ball_query.get_single_mut() {
-                            commands.entityy(cue_ball).insert(Velocity {linvel: direction * power, angvel: Vec3::ZERO})
+                        if let Ok(cue_ball) = cue_ball_query.get_single_mut() {
+                            commands.entity(cue_ball).insert(Velocity {linvel: direction * power, angvel: Vec3::ZERO});
                         }
                     },
                     ClientMessage::BallPlacement { position } => {
                         println!("Moving cue ball to: {}", position);
 
-                           if let Some(cue_ball) = cue_ball_query.get_single_mut() {
-                            commands.entityy(cue_ball).insert(Transform::from_translation(position));
+                           if let Ok(cue_ball) = cue_ball_query.get_single_mut() {
+                            commands.entity(cue_ball).insert(Transform::from_translation(position));
                         }
                     }
                     _ => {}
