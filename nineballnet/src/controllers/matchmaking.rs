@@ -17,6 +17,11 @@ pub async fn find(
         Error::BadRequest("Invalid player ID format in token".to_string())
     })?;
 
+    matches::Entity::delete_many()
+        .filter(matches::Column::PlayerId.eq(player_id))
+        .exec(&ctx.db)
+        .await?;
+
     // 2. Enqueue the job
     MatchmakingWorker::perform_later(
         &ctx, 
