@@ -115,7 +115,8 @@ fn main() {
        app
        .insert_state(WhoseMove::Player1)
        .insert_state(GamePhase::PreShot);
-    app.add_systems(Update, broadcast_state_to_clients);
+    app.add_systems(Update, broadcast_state_to_clients)
+    .add_systems(Update, handle_incoming_network_messages);
 
     app.insert_resource(GameState::default());
     app.add_plugins(NineBallRuleset);
@@ -138,6 +139,46 @@ fn broadcast_state_to_clients(
         },
         Err(e) => {
             eprintln!("Failed to serialize GameState: {}", e);
+        }
+    }
+}
+
+fn handle_incoming_network_messages(
+    // The channel we created in main()
+    mut inbound: ResMut<BrowserInbound>, 
+    // The state we need to update
+    mut game_state: ResMut<GameState>,
+    // Optional: Events if you use them to trigger physics
+    // mut shot_events: EventWriter<ShotEvent>, 
+    mut commands: Commands,
+    mut cue_ball_query: Query<&Entity, With<CueBall>>
+) {
+    // Loop until the channel is empty for this frame
+    while let Ok(bytes) = inbound.0.try_recv() {
+        match bincode::deserialize::<ClientMessage>(&bytes) {
+            Ok(message) => {
+                println!("Server received: {:?}", message);
+
+                match message {
+                    ClientMessage::Shot { power, direction, angvel } => {
+                        // Apply the shot logic directly to the state
+                        // OR trigger a physics event
+                        println!("Processing shot: Power {}", power);
+                        if let Some(cue_ball) = cue_ball_query.get_single_mut() {
+                            commands.entityy(cue_ball).insert(Velocity {linvel: direction * power, angvel: Vec3::ZERO})
+                        }
+                    },
+                    ClientMessage::BallPlacement { position } => {
+                        println!("Moving cue ball to: {}", position);
+
+                           if let Some(cue_ball) = cue_ball_query.get_single_mut() {
+                            commands.entityy(cue_ball).insert(Transform::from_translation(position));
+                        }
+                    }
+                    _ => {}
+                }
+            },
+            Err(e) => eprintln!("Failed to deserialize client message: {}", e),
         }
     }
 }
