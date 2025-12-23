@@ -111,19 +111,37 @@ fn main() {
 
     // Add your game logic
     // app.add_plugins(server::NineBallServerPlugin); 
-
-    app.init_asset::<Mesh>();
-    app.init_asset::<Scene>();
-    app.init_asset::<StandardMaterial>();
     
        app
        .insert_state(WhoseMove::Player1)
        .insert_state(GamePhase::PreShot);
+    app.add_systems(Update, broadcast_state_to_clients);
 
     app.insert_resource(GameState::default());
     app.add_plugins(NineBallRuleset);
     app.run();
 }
+
+// Add this component/system to send updates
+fn broadcast_state_to_clients(
+    game_state: Res<GameState>,
+    network_out: Res<BrowserOutbound>,
+) {
+    // 1. Serialize the current GameState
+    // We use a "Match" wrapper or just the raw state, depending on your client expectation.
+    // Based on your client code: bincode::deserialize::<GameState>(&data)
+    match bincode::serialize(&*game_state) {
+        Ok(data) => {
+            // 2. Send to the Tokio listener via the channel
+            // We ignore errors because if no clients are connected, send fails (which is fine)
+            let _ = network_out.0.send(data);
+        },
+        Err(e) => {
+            eprintln!("Failed to serialize GameState: {}", e);
+        }
+    }
+}
+
 
 // --- 4. NETWORK LOGIC ---
 #[derive(Clone)]
