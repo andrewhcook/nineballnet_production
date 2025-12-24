@@ -149,40 +149,42 @@ fn broadcast_state_to_clients(
 }
 
 
-fn update_gamestate(gamestate: Res<State<GameState>>, mut next_gamestate: ResMut<NextState<GameState>>, pool_ball_query: Query<(&Transform, &PoolBalls)>, cue_ball_query: Query<&Transform, With<CueBall>>)  {
-    
+use bevy_rapier3d::prelude::Velocity; // Ensure you have this import
+
+fn update_gamestate(
+    // FIX 1: Only ask for ResMut once. You can read AND write to this.
+    mut gamestate: ResMut<GameState>, 
+    // FIX 2: Query Velocity too, so the client knows how fast balls are moving
+    pool_ball_query: Query<(&Transform, &Velocity, &PoolBalls)>, 
+    cue_ball_query: Query<(&Transform, &Velocity), With<CueBall>>
+) {
     let mut ball_vec = vec![];
-    for (t, p) in pool_ball_query.iter() {
-        let ball_data_for_vec = BallData {
+
+    // 1. Collect Normal Balls
+    for (t, v, p) in pool_ball_query.iter() {
+        ball_vec.push(BallData {
             number: p.0,
             position: t.translation,
-            velocity: Vec3::ZERO,
-            rotation: t.rotation ,
+            // actually send velocity (v.linvel) instead of ZERO
+            velocity: v.linvel, 
+            rotation: t.rotation,
             is_cue: false,
-        };
-        ball_vec.push(ball_data_for_vec);
+        });
     }
-    
-    if let Ok(cue_ball_transform) = cue_ball_query.get_single(){
-        let ball_data_for_vec = BallData {
-            number: 0,
-            position: cue_ball_transform.translation,
-            velocity: Vec3::ZERO,
-            rotation: cue_ball_transform.rotation ,
-            is_cue: true,
-        };
-        ball_vec.push(ball_data_for_vec);
-    }
-    
-    let mut new_game_state = GameState {
-        balls: ball_vec,
-        phase: gamestate.clone().phase,
-        should_show_shot_controls: gamestate.clone().should_show_shot_controls,
-        whose_move: gamestate.clone().whose_move,
-    };
-    next_gamestate.set( new_game_state);
-}
 
+    // 2. Collect Cue Ball
+    if let Ok((t, v)) = cue_ball_query.get_single() {
+        ball_vec.push(BallData {
+            number: 0,
+            position: t.translation,
+            velocity: v.linvel,
+            rotation: t.rotation,
+            is_cue: true,
+        });
+    }
+
+    gamestate.balls = ball_vec;
+}
 fn handle_incoming_network_messages(
     // The channel we created in main()
     mut inbound: ResMut<BrowserInbound>, 
