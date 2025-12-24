@@ -131,10 +131,10 @@ commands
     commands.spawn(ShotPower(1.0, true));
     commands.spawn(Aimer).insert(Sensor);
     
-    commands.spawn(TargetBallTorus)
-    .insert(MaterialMeshBundle{mesh: meshes.add(TARGET_BALL_TORUS_DIMENSIONS), material: materials.add(StandardMaterial::from_color(Color::Hsla(Hsla::new(30.0 ,0.60, 0.20, 1.0)))), ..default()});
+ //   commands.spawn(TargetBallTorus)
+   // .insert(MaterialMeshBundle{mesh: meshes.add(TARGET_BALL_TORUS_DIMENSIONS), material: materials.add(StandardMaterial::from_color(Color::Hsla(Hsla::new(30.0 ,0.60, 0.20, 1.0)))), ..default()});
 
-    commands.spawn(TargetBallTorus).insert(MaterialMeshBundle{mesh: meshes.add(TARGET_BALL_TORUS_DIMENSIONS), material: materials.add(StandardMaterial::from_color(Color::Hsla(Hsla::new(30.0 ,0.60, 0.20, 1.0)))), ..default()});;
+   // commands.spawn(TargetBallTorus).insert(MaterialMeshBundle{mesh: meshes.add(TARGET_BALL_TORUS_DIMENSIONS), material: materials.add(StandardMaterial::from_color(Color::Hsla(Hsla::new(30.0 ,0.60, 0.20, 1.0)))), ..default()});;
 
 }
 
@@ -199,7 +199,7 @@ fn configure_app(app: &mut App) {
        ))
        .add_systems(Update, (
            aim_system, 
-           rotate_torus, 
+ //          rotate_torus, 
            display_shot_power, 
            increase_shot_power
        ).run_if(should_show_player_shot_controls))
