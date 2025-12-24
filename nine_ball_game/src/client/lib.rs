@@ -203,7 +203,7 @@ fn configure_app(app: &mut App) {
            display_shot_power, 
            increase_shot_power
        ).run_if(should_show_player_shot_controls))
-       .add_systems(Update, ball_in_hand.run_if(should_show_ball_in_hand).run_if(should_show_player_shot_controls))
+       .add_systems(Update, ball_in_hand.run_if(should_show_player_shot_controls))
        .add_systems(Update, despawn_aimer_polyline.run_if(should_not_show_player_shot_controls));
 }
 
