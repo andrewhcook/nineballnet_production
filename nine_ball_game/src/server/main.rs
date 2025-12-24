@@ -156,7 +156,9 @@ fn update_gamestate(
     mut gamestate: ResMut<GameState>, 
     // FIX 2: Query Velocity too, so the client knows how fast balls are moving
     pool_ball_query: Query<(&Transform, &Velocity, &PoolBalls)>, 
-    cue_ball_query: Query<(&Transform, &Velocity), With<CueBall>>
+    cue_ball_query: Query<(&Transform, &Velocity), With<CueBall>>,
+    gamephase_res: Res<State<GamePhase>>,
+    whose_move_res: Res<State<WhoseMove>>
 ) {
     let mut ball_vec = vec![];
 
@@ -182,7 +184,9 @@ fn update_gamestate(
             is_cue: true,
         });
     }
-
+    gamestate.whose_move = whose_move_res.get().clone();
+    gamestate.phase = gamephase_res.get().clone();
+    gamestate.should_show_shot_controls = true;
     gamestate.balls = ball_vec;
 }
 fn handle_incoming_network_messages(
