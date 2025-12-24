@@ -218,6 +218,19 @@ fn handle_incoming_network_messages(
 
                            if let Ok(cue_ball) = cue_ball_query.get_single_mut() {
                             commands.entity(cue_ball).insert(Transform::from_translation(position));
+                        } else {
+                            //respawn cue ball
+                             commands
+        .spawn(RigidBody::Dynamic)
+        .insert(Collider::ball(CUE_BALL_RADIUS))
+        .insert(BALL_RESTITUTION)
+        //.insert(ColliderMassProperties::Mass(0.40))
+        .insert(Transform::from_translation(position))
+        .insert(ColliderMassProperties::Mass(BALL_MASS))
+        .insert(BALL_DAMPING)
+        .insert(Friction::coefficient(BALL_FRICTION_COEFF))
+        .insert(DEFAULT_VELOCITY)
+        .insert(CueBall).insert(Ccd::enabled()).insert(ActiveEvents::COLLISION_EVENTS);
                         }
                     }
                     _ => {}
