@@ -123,6 +123,7 @@ fn main() {
     .add_systems(Update, handle_incoming_network_messages);
 
     app.insert_resource(GameState::default());
+    app.add_systems(Update, update_gamestate);
     app.add_plugins(NineBallRuleset);
     app.run();
 }
@@ -145,6 +146,41 @@ fn broadcast_state_to_clients(
             eprintln!("Failed to serialize GameState: {}", e);
         }
     }
+}
+
+
+fn update_gamestate(gamestate: Res<State<GameState>>, mut next_gamestate: ResMut<NextState<GameState>>, pool_ball_query: Query<(&Transform, &PoolBalls)>, cue_ball_query: Query<&Transform, With<CueBall>>)  {
+    
+    let mut ball_vec = vec![];
+    for (t, p) in pool_ball_query.iter() {
+        let ball_data_for_vec = BallData {
+            number: p.0,
+            position: t.translation,
+            velocity: Vec3::ZERO,
+            rotation: t.rotation ,
+            is_cue: false,
+        };
+        ball_vec.push(ball_data_for_vec);
+    }
+    
+    if let Ok(cue_ball_transform) = cue_ball_query.get_single(){
+        let ball_data_for_vec = BallData {
+            number: 0,
+            position: cue_ball_transform.translation,
+            velocity: Vec3::ZERO,
+            rotation: cue_ball_transform.rotation ,
+            is_cue: true,
+        };
+        ball_vec.push(ball_data_for_vec);
+    }
+    
+    let mut new_game_state = GameState {
+        balls: ball_vec,
+        phase: gamestate.clone().phase,
+        should_show_shot_controls: gamestate.clone().should_show_shot_controls,
+        whose_move: gamestate.clone().whose_move,
+    };
+    next_gamestate.set( new_game_state);
 }
 
 fn handle_incoming_network_messages(
@@ -888,7 +924,9 @@ enum GameVariant {
 }
 
 
-use nine_ball_game::GamePhase;
+use nine_ball_game::{BallData,GamePhase};
+
+
 
 
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash)]
