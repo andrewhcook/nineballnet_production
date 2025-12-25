@@ -314,10 +314,10 @@ fn render_gamestate(mut commands: Commands, gamestate: Res<GameState>, cue_ball_
      for i in &gamestate.balls{
         if i.is_cue {
             let cue_ball = cue_ball_query.single();
-            commands.entity(cue_ball).insert(TransformBundle::from_transform(Transform::from_translation(i.position)));
+            commands.entity(cue_ball).insert(TransformBundle::from_transform(Transform {translation: i.position, rotation: i.rotation, ..default()}));
         } else {
         if let Some( pool_ball )= pool_ball_query.iter().find(|(entity, pool_ball)| pool_ball.0 as u32 == i.number) {
-            commands.entity(pool_ball.0).insert(TransformBundle::from_transform(Transform::from_translation(i.position)));
+            commands.entity(pool_ball.0).insert(TransformBundle::from_transform(Transform {translation: i.position, rotation: i.rotation, ..default()}));
         }
         }
     }
