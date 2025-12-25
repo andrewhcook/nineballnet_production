@@ -420,9 +420,9 @@ let mut balls_to_spawn: Vec<(u32, Vec3)> = Vec::new();
 
 // Add the 9-ball explicitly to the center position (Index 0)
 balls_to_spawn.push((9, rack_positions[0]));
-
-// Create a list of the remaining balls (1-8)
-let mut other_balls = vec![1, 2, 3, 4, 5, 6, 7, 8];
+balls_to_spawn.push((1, rack_positions[1]));
+// Create a list of the remaining balls (2-8)
+let mut other_balls = vec![ 2, 3, 4, 5, 6, 7, 8];
 let mut rng = rand::thread_rng();
 other_balls.shuffle(&mut rng);
 
