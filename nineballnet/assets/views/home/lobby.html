@@ -3,8 +3,42 @@
 {% block content %}
 <div class="container mx-auto px-4 py-12">
     <div id="lobby-ui" class="max-w-md mx-auto bg-white dark:bg-gray-800 rounded-lg shadow-xl p-8 text-center border border-gray-200 dark:border-gray-700">
-        <h1 class="text-3xl font-bold mb-4 text-gray-900 dark:text-white">Matchmaking</h1>
+        <h1 class="text-3xl font-bold mb-6 text-gray-900 dark:text-white">Matchmaking</h1>
         
+        <div class="mb-8 text-left bg-gray-50 dark:bg-gray-700/50 p-5 rounded-lg border border-gray-100 dark:border-gray-600">
+            <h2 class="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-3 border-b border-gray-200 dark:border-gray-600 pb-2">
+                Game Guide
+            </h2>
+
+            <p class="text-sm text-gray-600 dark:text-gray-300 mb-4">
+                This game follows the standard 
+                <a href="https://en.wikipedia.org/wiki/Nine-ball" target="_blank" rel="noopener noreferrer" class="text-blue-600 dark:text-blue-400 hover:underline font-medium">
+                    Nine-ball Ruleset (Wikipedia)
+                </a>.
+            </p>
+
+            <div class="mb-4">
+                <h3 class="text-sm font-bold text-gray-700 dark:text-gray-200 mb-2 uppercase tracking-wide">Controls</h3>
+                <ul class="text-sm space-y-2 text-gray-600 dark:text-gray-300">
+                    <li class="flex items-start">
+                        <span class="font-mono bg-gray-200 dark:bg-gray-600 px-1.5 rounded mr-2 text-xs py-0.5">MOUSE</span>
+                        <span>Aim the shot</span>
+                    </li>
+                    <li class="flex items-start">
+                        <span class="font-mono bg-gray-200 dark:bg-gray-600 px-1.5 rounded mr-2 text-xs py-0.5">SPACE</span>
+                        <span>Shoot the ball</span>
+                    </li>
+                    <li class="flex items-start">
+                        <span class="font-mono bg-gray-200 dark:bg-gray-600 px-1.5 rounded mr-2 text-xs py-0.5">A KEY</span>
+                        <span>Place ball (after scratch)</span>
+                    </li>
+                </ul>
+            </div>
+
+            <div class="text-xs bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-200 p-3 rounded leading-relaxed">
+                <strong>Placement Tip:</strong> When placing the ball (A), the direction is set by the position of your cue ball relative to your cursor. The cue ball will move towards the point of the cursor.
+            </div>
+        </div>
         <div id="status-container" class="mb-8">
             <p id="status-text" class="text-gray-600 dark:text-gray-400 text-lg">
                 Ready to find a game?
@@ -32,7 +66,7 @@
 <script type="module">
     // We assume your wasm-pack build is in assets/static/pkg/
     // Adjust the path below if your build output is named differently
-        const userToken = "{{ token }}";
+    const userToken = "{{ token }}";
     import init, { run_game } from '/nineball_wasm.js';
 
     let isPolling = false;
@@ -50,13 +84,13 @@
         try {
             // 1. Tell Loco to start the matchmaking worker
             const response = await fetch('/api/matchmaking/find', {
-    method: 'POST',
-    headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${userToken}` // Make sure userToken is defined
-    },
-    body: JSON.stringify({ /* your search params */ })
-});
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${userToken}` // Make sure userToken is defined
+                },
+                body: JSON.stringify({ /* your search params */ })
+            });
 
             if (!response.ok) throw new Error("Could not start matchmaking");
 
