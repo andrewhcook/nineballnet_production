@@ -617,6 +617,14 @@ fn setup_numbers_above_pool_balls( mut commands: Commands, mut meshes: ResMut<As
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
     mesh.compute_flat_normals();
     let material = match raw_number {
+          1 | 9 => StandardMaterial::from_color(Color::rgb(1.0, 1.0, 0.0)), // Yellow (1 = solid, 9 = stripe)
+        2     => StandardMaterial::from_color(Color::rgb(0.0, 0.0, 1.0)), // Blue
+        3     => StandardMaterial::from_color(Color::rgb(1.0, 0.0, 0.0)), // Red
+        4     => StandardMaterial::from_color(Color::rgb(0.5, 0.0, 0.5)), // Purple
+        5     => StandardMaterial::from_color(Color::rgb(1.0, 0.5, 0.0)), // Orange
+        6     => StandardMaterial::from_color(Color::rgb(0.0, 1.0, 0.0)), // Green
+        7     => StandardMaterial::from_color(Color::rgb(0.5, 0.0, 0.0)), // Maroon
+        8     => StandardMaterial::from_color(Color::BLACK),      
         _ => StandardMaterial::from_color(Color::linear_rgb(0.60, 0.80, 1.0))
     };
     commands.spawn(FloatingNumber(raw_number as usize)).insert(MaterialMeshBundle {mesh: meshes.add(mesh), material: materials.add(material), transform: Transform {translation: Vec3::new(0.0,  0.00, 0.0), rotation: Quat::from_rotation_x(0.0), scale: Vec3::ONE * 1.5},visibility: Visibility::Visible,..default()});
