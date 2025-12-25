@@ -111,15 +111,15 @@
         
         try {
             // 3. Initialize Wasm
-            await init(); 
-            
             overlay.innerText = "Connecting to Game Server...";
+            await init(); 
 
+            overlay.innerText = ""; // Hide status once game takes over
+            
             // 4. Hand off to the Wasm engine
             // Parameters: canvas_id, gateway_url, handoff_token
             run_game("nineball-canvas", ticket.gateway_url, ticket.handoff_token);
 
-            overlay.innerText = ""; // Hide status once game takes over
         } catch (err) {
             console.error("Wasm failure:", err);
            
