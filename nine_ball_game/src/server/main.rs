@@ -3,6 +3,7 @@ use bevy::{prelude::*, scene::ScenePlugin};
 use bevy::app::ScheduleRunnerPlugin;
 use bevy_rapier3d::prelude::*;
 use clap::Parser;
+use rand::Rng;
 use std::time::Duration;
 use tokio::sync::{mpsc, broadcast};
 use axum::{
@@ -392,66 +393,84 @@ commands
 
 
 
+// ... inside your startup system ...
 
-// 1. GEOMETRY SETUP
-    // -----------------
-    let r = STANDARD_BALL_RADIUS;
-    
-    // SAFETY GAP: Keeps balls from overlapping and exploding
-    const SPACING_EPSILON: f32 = 0.0005; 
-    
-    // JITTER: The amount of randomness to apply to positions.
-    // Must be LESS than SPACING_EPSILON / 2.0 to ensure no accidental overlaps occur.
-    const MAX_JITTER: f32 = 0.0002; 
+// 1. GEOMETRY (Your existing geometry code is fine)
+let r = STANDARD_BALL_RADIUS;
+const SPACING_EPSILON: f32 = 0.0005; 
+const MAX_JITTER: f32 = 0.0002; 
 
-    // Calculate spacing based on radius + safety gap
-    let spacing_r = r + SPACING_EPSILON;
-    let z_spacing = 3.0_f32.sqrt() * spacing_r; 
-    let x_spacing = spacing_r; 
-    let center_z = TABLE_WIDTH; 
+let spacing_r = r + SPACING_EPSILON;
+let z_spacing = 3.0_f32.sqrt() * spacing_r; 
+let x_spacing = spacing_r; 
+let center_z = TABLE_WIDTH; 
 
-    // Define the ideal grid positions
-    let rack_positions = vec![
-        Vec3::new(0.0, r, center_z - 2.0 * z_spacing),      // Row 1
-        Vec3::new(-x_spacing, r, center_z - z_spacing),     // Row 2 Left
-        Vec3::new( x_spacing, r, center_z - z_spacing),     // Row 2 Right
-        Vec3::new(-2.0 * x_spacing, r, center_z),           // Row 3 Left
-        Vec3::new( 0.0,             r, center_z),           // Row 3 CENTER (9-ball spot)
-        Vec3::new( 2.0 * x_spacing, r, center_z),           // Row 3 Right
-        Vec3::new(-x_spacing, r, center_z + z_spacing),     // Row 4 Left
-        Vec3::new( x_spacing, r, center_z + z_spacing),     // Row 4 Right
-        Vec3::new(0.0, r, center_z + 2.0 * z_spacing),      // Row 5
-    ];
-// 2. Setup the balls
-// We separate the 9-ball, and create a list of the others to shuffle.
-let mut balls_to_spawn: Vec<(u32, Vec3)> = Vec::new();
+// Define positions relative to the 9-Ball (Center)
+let rack_positions = vec![
+    // Row 1 (Apex - Standard place for 1-ball)
+    Vec3::new(0.0, r, center_z - 2.0 * z_spacing),      // Index 0
 
-// Add the 9-ball explicitly to the center position (Index 0)
-balls_to_spawn.push((9, rack_positions[0]));
-balls_to_spawn.push((1, rack_positions[1]));
-// Create a list of the remaining balls (2-8)
-let mut other_balls = vec![ 2, 3, 4, 5, 6, 7, 8];
+    // Row 2
+    Vec3::new(-x_spacing, r, center_z - z_spacing),     // Index 1
+    Vec3::new( x_spacing, r, center_z - z_spacing),     // Index 2
+
+    // Row 3 (Wing Row - Center is 9-ball spot)
+    Vec3::new(-2.0 * x_spacing, r, center_z),           // Index 3
+    Vec3::new( 0.0,             r, center_z),           // Index 4 (CENTER)
+    Vec3::new( 2.0 * x_spacing, r, center_z),           // Index 5
+
+    // Row 4
+    Vec3::new(-x_spacing, r, center_z + z_spacing),     // Index 6
+    Vec3::new( x_spacing, r, center_z + z_spacing),     // Index 7
+
+    // Row 5 (Bottom Tip)
+    Vec3::new(0.0, r, center_z + 2.0 * z_spacing),      // Index 8
+];
+
+// 2. LOGIC FIX: AVOID DOUBLE ASSIGNMENT
+let mut spawn_list: Vec<(u32, Vec3)> = Vec::new();
+
+// A. FIXED BALLS
+// Standard 9-Ball: 1 is at Apex (Index 0), 9 is in Center (Index 4)
+spawn_list.push((1, rack_positions[0])); 
+spawn_list.push((9, rack_positions[4])); 
+
+// B. SHUFFLE THE REST
+// Balls 2-8 need to be shuffled into the REMAINING positions.
+let mut other_balls = vec![2, 3, 4, 5, 6, 7, 8];
 let mut rng = rand::thread_rng();
 other_balls.shuffle(&mut rng);
 
-// Assign shuffled balls to the remaining positions (Indices 1-8)
-for (i, &ball_number) in other_balls.iter().enumerate() {
-    // We skip index 0 of rack_positions because that is taken by the 9-ball
-    balls_to_spawn.push((ball_number, rack_positions[i + 1]));
+// Identify which indices are still empty (We used 0 and 4)
+let available_indices = vec![1, 2, 3, 5, 6, 7, 8];
+
+// Map the shuffled balls to the available indices
+for (i, &ball_num) in other_balls.iter().enumerate() {
+    let target_index = available_indices[i];
+    spawn_list.push((ball_num, rack_positions[target_index]));
 }
 
-// 3. Spawn everything in a loop
-for (ball_number, position) in balls_to_spawn {
+// 3. SPAWN LOOP
+for (ball_number, mut pos) in spawn_list {
+    
+    // Apply your Jitter (Excluding the fixed 9-ball if desired)
+    if ball_number != 9 {
+         let x_jitter: f32 = rng.gen_range(-MAX_JITTER..MAX_JITTER);
+         let z_jitter: f32 = rng.gen_range(-MAX_JITTER..MAX_JITTER);
+         pos.x += x_jitter;
+         pos.z += z_jitter;
+    }
+
     commands
         .spawn(RigidBody::Dynamic)
         .insert(Collider::ball(STANDARD_BALL_RADIUS))
         .insert(BALL_RESTITUTION)
-        .insert(PoolBalls(ball_number)) // Inserts the specific number
+        .insert(PoolBalls(ball_number))
         .insert(ColliderMassProperties::Mass(BALL_MASS))
         .insert(BALL_DAMPING)
         .insert(DEFAULT_VELOCITY)
         .insert(Friction::coefficient(BALL_FRICTION_COEFF))
-        .insert(TransformBundle::from(Transform::from_translation(position)))
+        .insert(TransformBundle::from(Transform::from_translation(pos)))
         .insert(Ccd::enabled())
         .insert(ActiveEvents::COLLISION_EVENTS);
 }
