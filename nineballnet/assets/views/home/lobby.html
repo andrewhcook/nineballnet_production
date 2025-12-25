@@ -119,7 +119,7 @@
             // Parameters: canvas_id, gateway_url, handoff_token
             run_game("nineball-canvas", ticket.gateway_url, ticket.handoff_token);
 
-            overlay.classList.add('hidden'); // Hide status once game takes over
+            overlay.innerText = ""; // Hide status once game takes over
         } catch (err) {
             console.error("Wasm failure:", err);
            

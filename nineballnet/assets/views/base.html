@@ -3,16 +3,59 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NineBall.net</title>
+    <title>Nine-Ball.net</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-gray-900 text-white">
+<body class="bg-gray-900 text-white flex flex-col min-h-screen">
     <nav class="p-4 bg-gray-800 border-b border-gray-700">
         <a href="/" class="font-bold text-xl">Nine-Ball.net</a>
     </nav>
     
-    <main>
+    <main class="flex-grow">
         {% block content %}{% endblock %}
     </main>
+
+    <div id="cookie-banner" class="fixed bottom-0 left-0 right-0 bg-gray-800 border-t border-gray-700 p-6 shadow-2xl transform translate-y-full transition-transform duration-300 z-50 hidden">
+        <div class="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div class="text-gray-300 text-sm text-center sm:text-left">
+                <p class="font-semibold text-white mb-1">We use minimal cookies.</p>
+                <p>By using this website you consent to the storage of a secure token in your browser used <span class="text-white font-medium">only</span> for authorization and authentication purposes.</p>
+            </div>
+            <button id="accept-cookies" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg text-sm font-semibold transition-colors shadow-sm whitespace-nowrap">
+                I Understand
+            </button>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const banner = document.getElementById('cookie-banner');
+            const acceptBtn = document.getElementById('accept-cookies');
+
+            // 1. Check if user has already consented
+            if (!localStorage.getItem('cookieConsent')) {
+                // Remove hidden class to make it render
+                banner.classList.remove('hidden');
+                // Small delay to trigger the slide-up animation
+                setTimeout(() => {
+                    banner.classList.remove('translate-y-full');
+                }, 100);
+            }
+
+            // 2. Handle Click
+            acceptBtn.addEventListener('click', () => {
+                // Save consent to LocalStorage
+                localStorage.setItem('cookieConsent', 'true');
+                
+                // Slide down animation
+                banner.classList.add('translate-y-full');
+                
+                // Remove from DOM after animation finishes (300ms)
+                setTimeout(() => {
+                    banner.classList.add('hidden');
+                }, 300);
+            });
+        });
+    </script>
 </body>
 </html>
