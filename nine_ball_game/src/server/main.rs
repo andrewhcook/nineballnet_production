@@ -312,6 +312,8 @@ async fn handle_socket(socket: WebSocket, state: NetworkState) {
         }
     }
 }
+
+use rand::seq::SliceRandom; // Ensure this is imported
 use nine_ball_game::{GameState, WhoseMove};
 use nine_ball_game::{TABLE_WIDTH, TABLE_LENGTH, FRICTION_COEFF, TABLE_FRICTION_COEFF, BALL_FRICTION_COEFF, CUE_BALL_RADIUS, STANDARD_BALL_RADIUS};
 // ... Player struct definition
@@ -389,107 +391,62 @@ commands
 
 
 
-    // Create the pool balls
+
+
+// Geometry Constants
+let r = STANDARD_BALL_RADIUS;
+let d = 2.0 * r;
+let z_spacing = 3.0_f32.sqrt() * r; // Vertical spacing for tight triangular packing (~1.732 * r)
+let y = r; 
+let center_z = TABLE_WIDTH; // The position of the 9-ball (middle of the rack)
+
+// 1. Define the 9 positions of a diamond rack relative to the center (0,0)
+// The center position is index 0. The rest are surrounding positions.
+let rack_positions = vec![
+    Vec3::new(0.0, y, center_z),                     // Middle (The 9-ball Spot)
+    Vec3::new(0.0, y, center_z - 2.0 * z_spacing),   // Apex (Top tip)
+    Vec3::new(-r,  y, center_z - z_spacing),         // Row 2 Left
+    Vec3::new(r,   y, center_z - z_spacing),         // Row 2 Right
+    Vec3::new(-d,  y, center_z),                     // Row 3 Left (Wing)
+    Vec3::new(d,   y, center_z),                     // Row 3 Right (Wing)
+    Vec3::new(-r,  y, center_z + z_spacing),         // Row 4 Left
+    Vec3::new(r,   y, center_z + z_spacing),         // Row 4 Right
+    Vec3::new(0.0, y, center_z + 2.0 * z_spacing),   // Bottom Tip
+];
+
+// 2. Setup the balls
+// We separate the 9-ball, and create a list of the others to shuffle.
+let mut balls_to_spawn: Vec<(u32, Vec3)> = Vec::new();
+
+// Add the 9-ball explicitly to the center position (Index 0)
+balls_to_spawn.push((9, rack_positions[0]));
+
+// Create a list of the remaining balls (1-8)
+let mut other_balls = vec![1, 2, 3, 4, 5, 6, 7, 8];
+let mut rng = rand::thread_rng();
+other_balls.shuffle(&mut rng);
+
+// Assign shuffled balls to the remaining positions (Indices 1-8)
+for (i, &ball_number) in other_balls.iter().enumerate() {
+    // We skip index 0 of rack_positions because that is taken by the 9-ball
+    balls_to_spawn.push((ball_number, rack_positions[i + 1]));
+}
+
+// 3. Spawn everything in a loop
+for (ball_number, position) in balls_to_spawn {
     commands
-    .spawn(RigidBody::Dynamic)
-    .insert(Collider::ball(STANDARD_BALL_RADIUS))
-    .insert(BALL_RESTITUTION)
-    .insert(PoolBalls(9))
-    .insert(ColliderMassProperties::Mass(BALL_MASS))
-    .insert(BALL_DAMPING)
-    .insert(DEFAULT_VELOCITY)
-    .insert(Friction::coefficient(BALL_FRICTION_COEFF))
-    .insert(TransformBundle::from(Transform::from_xyz(0.0, STANDARD_BALL_RADIUS, TABLE_WIDTH))).insert(Ccd::enabled()).insert(ActiveEvents::COLLISION_EVENTS);
-
-commands
-    .spawn(RigidBody::Dynamic)
-    .insert(Collider::ball(STANDARD_BALL_RADIUS))
-    .insert(BALL_RESTITUTION)
-    .insert(PoolBalls(4))
-    .insert(ColliderMassProperties::Mass(BALL_MASS))
-    .insert(BALL_DAMPING)
-    .insert(DEFAULT_VELOCITY)
-    .insert(Friction::coefficient(BALL_FRICTION_COEFF))
-    .insert(TransformBundle::from(Transform::from_xyz(STANDARD_BALL_RADIUS * 2.0, STANDARD_BALL_RADIUS, TABLE_WIDTH))).insert(Ccd::enabled()).insert(ActiveEvents::COLLISION_EVENTS);
-
-    commands
-    .spawn(RigidBody::Dynamic)
-    .insert(Collider::ball(STANDARD_BALL_RADIUS))
-    .insert(BALL_RESTITUTION)
-    .insert(PoolBalls(5))
-    .insert(ColliderMassProperties::Mass(BALL_MASS))
-    .insert(BALL_DAMPING)
-    .insert(DEFAULT_VELOCITY)
-    .insert(Friction::coefficient(BALL_FRICTION_COEFF))
-    .insert(TransformBundle::from(Transform::from_xyz(-STANDARD_BALL_RADIUS * 2.0, STANDARD_BALL_RADIUS, TABLE_WIDTH))).insert(Ccd::enabled()).insert(ActiveEvents::COLLISION_EVENTS);
-
-    commands
-    .spawn(RigidBody::Dynamic)
-    .insert(Collider::ball(STANDARD_BALL_RADIUS))
-    .insert(BALL_RESTITUTION)
-    .insert(PoolBalls(2))
-    .insert(ColliderMassProperties::Mass(BALL_MASS))
-    .insert(BALL_DAMPING)
-    .insert(DEFAULT_VELOCITY)
-    .insert(Friction::coefficient(BALL_FRICTION_COEFF))
-    .insert(TransformBundle::from(Transform::from_xyz(STANDARD_BALL_RADIUS, STANDARD_BALL_RADIUS, TABLE_WIDTH  - STANDARD_BALL_RADIUS * 2.0))).insert(Ccd::enabled()).insert(ActiveEvents::COLLISION_EVENTS);
-
-    commands
-    .spawn(RigidBody::Dynamic)
-    .insert(Collider::ball(STANDARD_BALL_RADIUS))
-    .insert(BALL_RESTITUTION)
-    .insert(PoolBalls(3))
-    .insert(ColliderMassProperties::Mass(BALL_MASS))
-    .insert(BALL_DAMPING)
-    .insert(DEFAULT_VELOCITY)
-    .insert(Friction::coefficient(BALL_FRICTION_COEFF))
-    .insert(TransformBundle::from(Transform::from_xyz(-STANDARD_BALL_RADIUS, STANDARD_BALL_RADIUS, TABLE_WIDTH - STANDARD_BALL_RADIUS * 2.0))).insert(Ccd::enabled()).insert(ActiveEvents::COLLISION_EVENTS);
-
-    commands
-    .spawn(RigidBody::Dynamic)
-    .insert(Collider::ball(STANDARD_BALL_RADIUS))
-    .insert(BALL_RESTITUTION)
-    .insert(PoolBalls(6))
-    .insert(ColliderMassProperties::Mass(BALL_MASS))
-    .insert(BALL_DAMPING)
-    .insert(DEFAULT_VELOCITY)
-    .insert(Friction::coefficient(BALL_FRICTION_COEFF))
-    .insert(TransformBundle::from(Transform::from_xyz(-STANDARD_BALL_RADIUS, STANDARD_BALL_RADIUS, TABLE_WIDTH + STANDARD_BALL_RADIUS * 2.0))).insert(Ccd::enabled()).insert(ActiveEvents::COLLISION_EVENTS);
-
-    commands
-    .spawn(RigidBody::Dynamic)
-    .insert(Collider::ball(STANDARD_BALL_RADIUS))
-    .insert(BALL_RESTITUTION)
-    .insert(PoolBalls(7))
-    .insert(ColliderMassProperties::Mass(BALL_MASS))
-    .insert(BALL_DAMPING)
-    .insert(DEFAULT_VELOCITY)
-    .insert(Friction::coefficient(BALL_FRICTION_COEFF))
-    .insert(TransformBundle::from(Transform::from_xyz(STANDARD_BALL_RADIUS , STANDARD_BALL_RADIUS, TABLE_WIDTH  + STANDARD_BALL_RADIUS * 2.0))).insert(Ccd::enabled()).insert(ActiveEvents::COLLISION_EVENTS);
-
-commands
-    .spawn(RigidBody::Dynamic)
-    .insert(Collider::ball(STANDARD_BALL_RADIUS))
-    .insert(BALL_RESTITUTION)
-    .insert(PoolBalls(1))
-    .insert(ColliderMassProperties::Mass(BALL_MASS))
-    .insert(BALL_DAMPING)
-    .insert(DEFAULT_VELOCITY)
-    .insert(Friction::coefficient(BALL_FRICTION_COEFF))
-    .insert(TransformBundle::from(Transform::from_xyz(0.0, STANDARD_BALL_RADIUS, TABLE_WIDTH - 4.0 * STANDARD_BALL_RADIUS))).insert(Ccd::enabled()).insert(ActiveEvents::COLLISION_EVENTS);
-
-commands
-.spawn(RigidBody::Dynamic)
-.insert(Collider::ball(STANDARD_BALL_RADIUS))
-.insert(BALL_RESTITUTION)
-.insert(PoolBalls(8))
-    .insert(ColliderMassProperties::Mass(BALL_MASS))
-    .insert(BALL_DAMPING)
-    .insert(DEFAULT_VELOCITY)
-    .insert(Friction::coefficient(BALL_FRICTION_COEFF))
-    .insert(TransformBundle::from(Transform::from_xyz(0.0, STANDARD_BALL_RADIUS, TABLE_WIDTH  + 4.0 * STANDARD_BALL_RADIUS))).insert(Ccd::enabled()).insert(ActiveEvents::COLLISION_EVENTS)
-    ; 
-
+        .spawn(RigidBody::Dynamic)
+        .insert(Collider::ball(STANDARD_BALL_RADIUS))
+        .insert(BALL_RESTITUTION)
+        .insert(PoolBalls(ball_number)) // Inserts the specific number
+        .insert(ColliderMassProperties::Mass(BALL_MASS))
+        .insert(BALL_DAMPING)
+        .insert(DEFAULT_VELOCITY)
+        .insert(Friction::coefficient(BALL_FRICTION_COEFF))
+        .insert(TransformBundle::from(Transform::from_translation(position)))
+        .insert(Ccd::enabled())
+        .insert(ActiveEvents::COLLISION_EVENTS);
+}
 }
 
 
