@@ -393,27 +393,35 @@ commands
 
 
 
-// Geometry Constants
-let r = STANDARD_BALL_RADIUS;
-let d = 2.0 * r;
-let z_spacing = 3.0_f32.sqrt() * r; // Vertical spacing for tight triangular packing (~1.732 * r)
-let y = r; 
-let center_z = TABLE_WIDTH; // The position of the 9-ball (middle of the rack)
+// 1. GEOMETRY SETUP
+    // -----------------
+    let r = STANDARD_BALL_RADIUS;
+    
+    // SAFETY GAP: Keeps balls from overlapping and exploding
+    const SPACING_EPSILON: f32 = 0.0005; 
+    
+    // JITTER: The amount of randomness to apply to positions.
+    // Must be LESS than SPACING_EPSILON / 2.0 to ensure no accidental overlaps occur.
+    const MAX_JITTER: f32 = 0.0002; 
 
-// 1. Define the 9 positions of a diamond rack relative to the center (0,0)
-// The center position is index 0. The rest are surrounding positions.
-let rack_positions = vec![
-    Vec3::new(0.0, y, center_z),                     // Middle (The 9-ball Spot)
-    Vec3::new(0.0, y, center_z - 2.0 * z_spacing),   // Apex (Top tip)
-    Vec3::new(-r,  y, center_z - z_spacing),         // Row 2 Left
-    Vec3::new(r,   y, center_z - z_spacing),         // Row 2 Right
-    Vec3::new(-d,  y, center_z),                     // Row 3 Left (Wing)
-    Vec3::new(d,   y, center_z),                     // Row 3 Right (Wing)
-    Vec3::new(-r,  y, center_z + z_spacing),         // Row 4 Left
-    Vec3::new(r,   y, center_z + z_spacing),         // Row 4 Right
-    Vec3::new(0.0, y, center_z + 2.0 * z_spacing),   // Bottom Tip
-];
+    // Calculate spacing based on radius + safety gap
+    let spacing_r = r + SPACING_EPSILON;
+    let z_spacing = 3.0_f32.sqrt() * spacing_r; 
+    let x_spacing = spacing_r; 
+    let center_z = TABLE_WIDTH; 
 
+    // Define the ideal grid positions
+    let rack_positions = vec![
+        Vec3::new(0.0, r, center_z - 2.0 * z_spacing),      // Row 1
+        Vec3::new(-x_spacing, r, center_z - z_spacing),     // Row 2 Left
+        Vec3::new( x_spacing, r, center_z - z_spacing),     // Row 2 Right
+        Vec3::new(-2.0 * x_spacing, r, center_z),           // Row 3 Left
+        Vec3::new( 0.0,             r, center_z),           // Row 3 CENTER (9-ball spot)
+        Vec3::new( 2.0 * x_spacing, r, center_z),           // Row 3 Right
+        Vec3::new(-x_spacing, r, center_z + z_spacing),     // Row 4 Left
+        Vec3::new( x_spacing, r, center_z + z_spacing),     // Row 4 Right
+        Vec3::new(0.0, r, center_z + 2.0 * z_spacing),      // Row 5
+    ];
 // 2. Setup the balls
 // We separate the 9-ball, and create a list of the others to shuffle.
 let mut balls_to_spawn: Vec<(u32, Vec3)> = Vec::new();
