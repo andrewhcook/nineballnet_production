@@ -55,8 +55,8 @@ pub struct GameState {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum ClientMessage {
     Join { name: String },
-    Shot { power: f32, direction: Vec3, angvel: Vec3 }, 
-    BallPlacement { position: Vec3 },
+    Shot { power: f32, direction: Vec3, angvel: Vec3, token: String }, 
+    BallPlacement { position: Vec3, token: String },
 }
 
 #[derive(States,Default, Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
