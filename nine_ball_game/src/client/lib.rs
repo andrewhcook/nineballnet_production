@@ -64,7 +64,7 @@ pub enum TypeOfMessage {
 #[derive(Component)]
 struct CueBall;
 #[derive(Component, Debug, Copy, Clone, Eq, PartialEq, Hash)]
-struct PoolBalls(usize);
+struct PoolBalls(u32);
 #[derive(Component)]
 struct ShotPower(f32, bool);
 #[derive(Component)]
@@ -310,7 +310,6 @@ fn should_show_ball_in_hand(gamestate: Res<GameState>) -> bool {
 
 fn render_gamestate(mut exit: EventWriter<AppExit>, mut commands: Commands, gamestate: Res<GameState>, cue_ball_query: Query<Entity, With<CueBall>>, pool_ball_query: Query<(Entity, &PoolBalls)>) {
      
-     let mut nine_ball_found = false;
      for i in &gamestate.balls{
         if i.is_cue {
             let cue_ball = cue_ball_query.single();
@@ -318,10 +317,18 @@ fn render_gamestate(mut exit: EventWriter<AppExit>, mut commands: Commands, game
         } else {
         if let Some( pool_ball )= pool_ball_query.iter().find(|(entity, pool_ball)| pool_ball.0 as u32 == i.number) {
             if i.number as u32 == 9 {
-                nine_ball_found = true;
             }
             commands.entity(pool_ball.0).insert(TransformBundle::from_transform(Transform {translation: i.position, rotation: i.rotation, ..default()}));
         } 
+        }
+    }
+
+    //remove pocketed balls from stale client render
+
+    for (entity, pool_ball) in pool_ball_query.iter() {
+        let mut ball_found = false;
+        if let Some(found_pool_ball) = &gamestate.balls.iter().find(|ball_data| ball_data.number == pool_ball.0) {
+            commands.entity(entity).despawn();
         }
     }
 
@@ -359,7 +366,7 @@ fn spawn_pool_balls(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>,   
     // Spawn Object Balls (1-9) with correct color and height
     for i in 1 as usize..=9 as usize{
         let color = ball_color(i);
-        commands.spawn(PoolBalls(i))
+        commands.spawn(PoolBalls(i as u32))
             .insert(MaterialMeshBundle {
                 mesh: meshes.add(Sphere::new(STANDARD_BALL_RADIUS)), 
                 material: materials.add(StandardMaterial::from_color(color)), 
@@ -598,7 +605,7 @@ fn rotate_numbers_around_pool_balls(mut commands: Commands, mut number_query: Qu
 fn show_numbers_above_pool_balls(mut commands: Commands, mut ball_query: Query<(Entity, &Transform, &PoolBalls)>, mut floater_query: Query<(&mut Transform, &FloatingNumber), Without<PoolBalls>>) {
     for (pool_ball_entity,  pool_ball_transform, pool_ball_itself) in ball_query.iter_mut() {
         for  (mut floater_transform, number_itself) in floater_query.iter_mut() {
-            if number_itself.0  == pool_ball_itself.0 {
+            if number_itself.0 as u32  == pool_ball_itself.0 {
                 floater_transform.translation = pool_ball_transform.translation + Vec3::Y * 0.04;
                 floater_transform.align(-Dir3::Y, Dir3::X, -Dir3::X, Dir3::Z);
             }
