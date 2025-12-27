@@ -195,7 +195,8 @@ fn handle_incoming_network_messages(
     mut inbound: ResMut<BrowserInbound>, 
     // The state we need to update
     // Optional: Events if you use them to trigger physics
-     mut shot_events: EventWriter<ShotEvent>,
+     mut shot_events: EventWriter<ShotMade>,
+     current_state: Res<State<GamePhase>> , 
     mut set_state: ResMut<NextState<GamePhase>>, 
     mut commands: Commands,
     mut cue_ball_query: Query<Entity, With<CueBall>>,
@@ -214,18 +215,19 @@ fn handle_incoming_network_messages(
                         // OR trigger a physics event
                         // validate player and game state
 
-                           if !match whose_move {
-                            WhoseMove::Player1 => game_tokens.p1 == token,
-                            WhoseMove::Player2 => game_tokens.p2 == token,
+                           if !match **whose_move {
+                            WhoseMove::Player1 => game_tokens.p1 == token && **whose_move == WhoseMove::Player1 && **current_state == GamePhase::PreShot,
+                            WhoseMove::Player2 => game_tokens.p2 == token && **whose_move == WhoseMove::Player2 && **current_state == GamePhase::PreShot,
                         } {
-                            println!("Shot Rejected: Auth token does not match");
+                             println!("Shot Rejected: Auth token does not match or not players turn");
                             return;
-                        }
+                        };
 
                         println!("Processing shot: Power {}", power);
                         if let Ok(cue_ball) = cue_ball_query.get_single_mut() {
                             commands.entity(cue_ball).insert(Velocity {linvel: direction * power, angvel: Vec3::ZERO});
                             //issue shot made event
+                            shot_events.send(ShotMade);
                         }
                     },
                     ClientMessage::BallPlacement { position, token } => {
@@ -234,13 +236,13 @@ fn handle_incoming_network_messages(
 
 
 
-                        if !match whose_move {
-                            WhoseMove::Player1 => game_tokens.p1 == token && whose_move == WhoseMove::Player1,
-                            WhoseMove::Player2 => game_tokens.p2 == token && WhoseMove::Player2,
+                        if !match **whose_move {
+                            WhoseMove::Player1 => game_tokens.p1 == token && **whose_move == WhoseMove::Player1 && **current_state == GamePhase::BallInHand,
+                            WhoseMove::Player2 => game_tokens.p2 == token && **whose_move == WhoseMove::Player2 && **current_state == GamePhase::BallInHand,
                         } {
                              println!("Ball Placement Rejected: Auth token does not match or not players turn");
                             return;
-                        }
+                        };
 
                         println!("Moving cue ball to: {}", position);
 
@@ -957,7 +959,6 @@ enum GameVariant {
 
 use nine_ball_game::{BallData,GamePhase};
 
-use crate::root_logic::WhoseMove;
 
 
 
