@@ -316,8 +316,7 @@ fn render_gamestate(mut exit: EventWriter<AppExit>, mut commands: Commands, game
             commands.entity(cue_ball).insert(TransformBundle::from_transform(Transform {translation: i.position, rotation: i.rotation, ..default()}));
         } else {
         if let Some( pool_ball )= pool_ball_query.iter().find(|(entity, pool_ball)| pool_ball.0 as u32 == i.number) {
-            if i.number as u32 == 9 {
-            }
+           
             commands.entity(pool_ball.0).insert(TransformBundle::from_transform(Transform {translation: i.position, rotation: i.rotation, ..default()}));
         } 
         }
@@ -328,8 +327,9 @@ fn render_gamestate(mut exit: EventWriter<AppExit>, mut commands: Commands, game
     for (entity, pool_ball) in pool_ball_query.iter() {
         let mut ball_found = false;
         if let Some(found_pool_ball) = &gamestate.balls.iter().find(|ball_data| ball_data.number == pool_ball.0) {
+        } else {
             commands.entity(entity).despawn();
-        }
+                    }
     }
 
     if gamestate.phase == GamePhase::GameEnded {
