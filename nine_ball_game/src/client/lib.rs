@@ -325,7 +325,7 @@ fn render_gamestate(mut exit: EventWriter<AppExit>, mut commands: Commands, game
         }
     }
 
-    if !nine_ball_found {
+    if gamestate.phase == GamePhase::GameEnded {
         exit.send(AppExit::Success);
     }
 
