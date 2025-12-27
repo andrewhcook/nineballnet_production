@@ -325,12 +325,18 @@ fn render_gamestate(mut exit: EventWriter<AppExit>, mut commands: Commands, game
     //remove pocketed balls from stale client render
 
     for (entity, pool_ball) in pool_ball_query.iter() {
-        let mut ball_found = false;
-        if let Some(found_pool_ball) = &gamestate.balls.iter().find(|ball_data| ball_data.number == pool_ball.0) {
-        } else {
-            commands.entity(entity).despawn();
-                    }
+    
+    // Check if this specific ball ID exists in the incoming server gamestate
+    // We use .any() which returns true if found, false if not.
+    let exists_on_server = gamestate.balls.iter().any(|ball_data| ball_data.number == pool_ball.0);
+
+    // If it does NOT exist on the server, it has been pocketed. Despawn it locally.
+    if !exists_on_server {
+        commands.entity(entity).despawn_recursive();
     }
+}
+
+    
 
     if gamestate.phase == GamePhase::GameEnded {
         exit.send(AppExit::Success);
