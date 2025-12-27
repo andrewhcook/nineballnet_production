@@ -126,6 +126,7 @@ fn main() {
     app.insert_resource(GameState::default());
     app.add_systems(Update, update_gamestate);
     app.add_plugins(NineBallRuleset);
+    app.add_systems(Update, send_game_ended_on_exit );
     app.run();
 }
 
@@ -906,6 +907,43 @@ fn tabulate_for_nine_ball( mut first_contact: ResMut<NextState<FirstContactHasBe
     scratch_setter.set(Scratch(false));
 }
 
+
+fn send_game_ended_on_exit(
+    mut exit_events: EventReader<AppExit>,
+    // Use your actual Network Resource/Channel here
+    network_out: Res<BrowserOutbound>,
+    current_state: Res<GameState>, 
+) {
+    // Check if an exit event has been emitted this frame
+    if !exit_events.is_empty() {
+        // We don't necessarily need to consume the event, just peek at it
+        // (or iterate if you want to be standard)
+        for _ in exit_events.read() {
+            info!("App shutting down: Sending GameEnded payload...");
+
+
+
+
+
+
+            // 1. Construct the final state payload
+            // You might need to clone your current state and force the phase
+            let mut final_packet = current_state.clone();
+            final_packet.phase = GamePhase::GameEnded;
+
+              match bincode::serialize(&final_packet) {
+        Ok(data) => {
+            // 2. Send to the Tokio listener via the channel
+            // We ignore errors because if no clients are connected, send fails (which is fine)
+            let _ = network_out.0.send(data);
+        },
+        Err(e) => {
+            eprintln!("Failed to serialize GameState: {}", e);
+        }
+    }
+        }
+    }
+}
 
 //run before tabulate
 fn check_for_win_in_nine_ball(mut game_ended_event_writer: EventWriter<GameEndedEvent>, mut next_game_phase: ResMut<NextState<GamePhase>>,pool_ball_query: Query<&PoolBalls>, is_scratch: Res<State<Scratch>>, whose_turn: Res<State<WhoseMove>>, mut winner: ResMut<NextState<Winner>>) {
