@@ -247,7 +247,7 @@ fn handle_incoming_network_messages(
                         println!("Moving cue ball to: {}", position);
 
                            if let Ok(cue_ball) = cue_ball_query.get_single_mut() {
-                            commands.entity(cue_ball).insert(Transform::from_translation(position + Vec3::Y)).insert(Velocity {linvel: Vec3::ZERO, angvel: Vec3::ZERO });
+                            commands.entity(cue_ball).insert(Transform::from_translation(position + Vec3::Y * 3.0)).insert(Velocity {linvel: Vec3::ZERO, angvel: Vec3::ZERO });
                         } else {
                             //respawn cue ball
                              commands
@@ -255,7 +255,7 @@ fn handle_incoming_network_messages(
         .insert(Collider::ball(CUE_BALL_RADIUS))
         .insert(BALL_RESTITUTION)
         //.insert(ColliderMassProperties::Mass(0.40))
-        .insert(Transform::from_translation(position + Vec3::Y ))
+        .insert(Transform::from_translation(position + Vec3::Y *3.0 ))
         .insert(ColliderMassProperties::Mass(BALL_MASS))
         .insert(BALL_DAMPING)
         .insert(Friction::coefficient(BALL_FRICTION_COEFF))
