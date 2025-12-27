@@ -902,7 +902,7 @@ fn tabulate_for_nine_ball( mut first_contact: ResMut<NextState<FirstContactHasBe
 
 
 //run before tabulate
-fn check_for_win_in_nine_ball(pool_ball_query: Query<&PoolBalls>, is_scratch: Res<State<Scratch>>, whose_turn: Res<State<WhoseMove>>, mut winner: ResMut<NextState<Winner>>) {
+fn check_for_win_in_nine_ball(mut exit: EventWriter<AppExit>,pool_ball_query: Query<&PoolBalls>, is_scratch: Res<State<Scratch>>, whose_turn: Res<State<WhoseMove>>, mut winner: ResMut<NextState<Winner>>) {
     for i in pool_ball_query.iter() {
         if i.0 == 9{
             return
@@ -916,6 +916,7 @@ fn check_for_win_in_nine_ball(pool_ball_query: Query<&PoolBalls>, is_scratch: Re
     } else {
         winner.set(Winner(whose_turn.get().clone()));
     };
+    exit.send(AppExit::Success);
 }
 
 //
