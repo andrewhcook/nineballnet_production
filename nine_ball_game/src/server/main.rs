@@ -891,7 +891,7 @@ fn tabulate_for_nine_ball( mut first_contact: ResMut<NextState<FirstContactHasBe
         change_shooter = true;
     }
     println!("{:?} {:?}", is_scratch.get().0, change_shooter);
-    if is_scratch.get().0 || scratch {
+    if is_scratch.get().0 || scratch  || *check_first_contact.get() == FirstContactHasBeenMade::NotYet{
         next_phase.set(GamePhase::BallInHand);
     } else {
         println!("next phase set");
