@@ -308,19 +308,27 @@ fn should_show_ball_in_hand(gamestate: Res<GameState>) -> bool {
 
 // --- Network and State Handling ---
 
-fn render_gamestate(mut commands: Commands, gamestate: Res<GameState>, cue_ball_query: Query<Entity, With<CueBall>>, pool_ball_query: Query<(Entity, &PoolBalls)>) {
+fn render_gamestate(mut exit: EventWriter<AppExit>, mut commands: Commands, gamestate: Res<GameState>, cue_ball_query: Query<Entity, With<CueBall>>, pool_ball_query: Query<(Entity, &PoolBalls)>) {
      
-     
+     let mut nine_ball_found = false;
      for i in &gamestate.balls{
         if i.is_cue {
             let cue_ball = cue_ball_query.single();
             commands.entity(cue_ball).insert(TransformBundle::from_transform(Transform {translation: i.position, rotation: i.rotation, ..default()}));
         } else {
         if let Some( pool_ball )= pool_ball_query.iter().find(|(entity, pool_ball)| pool_ball.0 as u32 == i.number) {
+            if i.number as u32 == 9 {
+                nine_ball_found = true;
+            }
             commands.entity(pool_ball.0).insert(TransformBundle::from_transform(Transform {translation: i.position, rotation: i.rotation, ..default()}));
-        }
+        } 
         }
     }
+
+    if !nine_ball_found {
+        exit.send(AppExit::Success);
+    }
+
 }
 
 // --- Ball Spawning (Including User's Preferred Color and Placement Fix) ---
@@ -415,14 +423,14 @@ fn despawn_aimer_polyline(mut commands: Commands, mut aimer_query: Query<Entity,
 
 }
 
-fn ball_in_hand(mut network_client: ResMut<NetworkClient>,camera_query:  Query<(&Camera, &GlobalTransform), With<MyGameCamera>>,keys: Res<ButtonInput<KeyCode>>, q_window: Query<&Window, With<PrimaryWindow>> ) {
+fn ball_in_hand(connection_ticket: Res<ConnectionTicket>, mut network_client: ResMut<NetworkClient>,camera_query:  Query<(&Camera, &GlobalTransform), With<MyGameCamera>>,keys: Res<ButtonInput<KeyCode>>, q_window: Query<&Window, With<PrimaryWindow>> ) {
     
      
         let window = q_window.single();
         let (camera, camera_transform) = camera_query.single();
         if let Ok(mut local_cursor) = get_vec3_of_local_cursor_position_from_global(camera, camera_transform, window) {
         if keys.just_pressed(KeyCode::KeyA) {
-            let message = ClientMessage::BallPlacement { position: local_cursor };
+            let message = ClientMessage::BallPlacement { position: local_cursor, token: connection_ticket.handoff_token.clone() };
             
             let payload = bincode::serialize(&message).unwrap();
             let ws_message = WsMessage::Binary(payload);
@@ -450,7 +458,7 @@ fn calculate_z(x: f32, y: f32, r: f32) -> Option<f32> {
     }
 }
 
-fn aim_system(mut network_client: ResMut<NetworkClient>,shot_power_query: Query<(Entity, &ShotPower)>,cue_ball_query: Query<(&Transform, Entity), With<CueBall>> , pool_ball_query: Query<(Entity, &Transform),With<PoolBalls>>, mut ball_reaction_angle_query:  Query<Entity, With<BallReactionVector>>, reaction_angle_query: Query<Entity, With<ContactAngleVisual>>, rapier_context: Res<RapierContext>, mut commands: Commands, keys: Res<ButtonInput<KeyCode>>,  camera_query:  Query<(&Camera, &GlobalTransform), With<MyGameCamera>>,  q_window: Query<&Window, With<PrimaryWindow>>, mut aimer_query: Query<Entity, With< Aimer>>) {
+fn aim_system(connection_ticket: Res<ConnectionTicket>, mut network_client: ResMut<NetworkClient>,shot_power_query: Query<(Entity, &ShotPower)>,cue_ball_query: Query<(&Transform, Entity), With<CueBall>> , pool_ball_query: Query<(Entity, &Transform),With<PoolBalls>>, mut ball_reaction_angle_query:  Query<Entity, With<BallReactionVector>>, reaction_angle_query: Query<Entity, With<ContactAngleVisual>>, rapier_context: Res<RapierContext>, mut commands: Commands, keys: Res<ButtonInput<KeyCode>>,  camera_query:  Query<(&Camera, &GlobalTransform), With<MyGameCamera>>,  q_window: Query<&Window, With<PrimaryWindow>>, mut aimer_query: Query<Entity, With< Aimer>>) {
     // There is only one primary window, so we can similarly get it from the query:
 
     let (shot_power_entity, shot_power) = shot_power_query.single();
@@ -549,7 +557,8 @@ fn aim_system(mut network_client: ResMut<NetworkClient>,shot_power_query: Query<
                         let message = ClientMessage::Shot{ 
                               power: shot_power.0 * 1.25, 
                               direction: direction_vector.normalize_or_zero(), 
-                              angvel: Vec3::ZERO 
+                              angvel: Vec3::ZERO,
+                            token: connection_ticket.handoff_token.clone()  
                           };
                           let payload = bincode::serialize(&message).unwrap();
                           let ws_message = WsMessage::Binary(payload);
