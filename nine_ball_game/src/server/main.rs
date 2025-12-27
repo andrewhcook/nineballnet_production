@@ -247,14 +247,13 @@ fn handle_incoming_network_messages(
                         println!("Moving cue ball to: {}", position);
 
                            if let Ok(cue_ball) = cue_ball_query.get_single_mut() {
-                            commands.entity(cue_ball).insert(Transform::from_translation(position + Vec3::Y * 2.0)).insert(Velocity {linvel: Vec3::ZERO, angvel: Vec3::ZERO });
+                            commands.entity(cue_ball).insert(TransformBundle::from(Transform::from_translation(position + Vec3::Y * 2.0))).insert(Velocity {linvel: Vec3::ZERO, angvel: Vec3::ZERO });
                         } else {
                             //respawn cue ball
                              commands
         .spawn(RigidBody::Dynamic)
         .insert(Collider::ball(CUE_BALL_RADIUS))
         .insert(BALL_RESTITUTION)
-        //.insert(ColliderMassProperties::Mass(0.40))
         .insert(TransformBundle::from(Transform::from_translation(position + Vec3::Y *2.0 )))
         .insert(ColliderMassProperties::Mass(BALL_MASS))
         .insert(BALL_DAMPING)
@@ -262,6 +261,9 @@ fn handle_incoming_network_messages(
         .insert(CueBall).insert(Ccd::enabled()).insert(ActiveEvents::COLLISION_EVENTS).insert(Velocity {linvel: Vec3::ZERO, angvel: Vec3::ZERO });
 
                         }
+
+                        //set new gamephase
+                        set_state.set(GamePhase::PreShot);
                     }
                     _ => {}
                 }
@@ -364,7 +366,7 @@ fn setup_physics_for_nine_ball(mut commands: Commands  ) {
         .insert(Collider::cuboid(TABLE_WIDTH, 0.0, TABLE_LENGTH))
       //  .insert(Friction{coefficient: FRICTION_COEFF, combine_rule: CoefficientCombineRule::Average})
       .insert(Friction::coefficient(TABLE_FRICTION_COEFF))
-        .insert(TransformBundle::from(Transform::from_xyz(0.0, 3.0, 0.0)));
+        .insert(TransformBundle::from(Transform::from_xyz(0.0, 5.0, 0.0)));
 
     //create the walls
     commands
