@@ -592,10 +592,12 @@ impl Plugin for GameMode {
         .insert_state(Scratch(false))
     .insert_state(FirstContactHasBeenMade::NotYet)
         .add_systems(Update, despawn_pocketed_balls.run_if(in_state(GamePhase::InMotion)))
+        .add_event::<GameEndedEvent>()
         .add_event::<HumanPlayerMoveStart>()
         .add_event::<ComputerPlayerMoveStart>()
         .add_event::<ShotMade>()
-           .add_event::<ShotCompletedPhysics>();
+           .add_event::<ShotCompletedPhysics>()
+           .add_systems(Update, game_ended_event_reader);
 
     }
     
@@ -904,7 +906,7 @@ fn tabulate_for_nine_ball( mut first_contact: ResMut<NextState<FirstContactHasBe
 
 
 //run before tabulate
-fn check_for_win_in_nine_ball(mut exit: EventWriter<AppExit>,pool_ball_query: Query<&PoolBalls>, is_scratch: Res<State<Scratch>>, whose_turn: Res<State<WhoseMove>>, mut winner: ResMut<NextState<Winner>>) {
+fn check_for_win_in_nine_ball(mut game_ended_event_writer: EventWriter<GameEndedEvent>, mut next_game_phase: ResMut<NextState<GamePhase>>,pool_ball_query: Query<&PoolBalls>, is_scratch: Res<State<Scratch>>, whose_turn: Res<State<WhoseMove>>, mut winner: ResMut<NextState<Winner>>) {
     for i in pool_ball_query.iter() {
         if i.0 == 9{
             return
@@ -918,8 +920,23 @@ fn check_for_win_in_nine_ball(mut exit: EventWriter<AppExit>,pool_ball_query: Qu
     } else {
         winner.set(Winner(whose_turn.get().clone()));
     };
-    exit.send(AppExit::Success);
+
+    next_game_phase.set(GamePhase::GameEnded);
+
+    game_ended_event_writer.send(GameEndedEvent);
 }
+
+#[derive(Event)]
+pub struct GameEndedEvent;
+
+fn game_ended_event_reader(mut game_ended_event_reader: EventReader<GameEndedEvent>,mut exit: EventWriter<AppExit>) {
+
+    for i in game_ended_event_reader.read() {
+        exit.send(AppExit::Success);
+
+    }
+}
+
 
 //
 fn setup_nine_ball_game() {
