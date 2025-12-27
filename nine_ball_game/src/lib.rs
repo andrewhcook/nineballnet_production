@@ -74,5 +74,6 @@ pub enum GamePhase {
     PreShot,
     BallInHand,
     InMotion,
-    PostShot
+    PostShot,
+    GameEnded
 }
