@@ -126,7 +126,7 @@ fn main() {
     app.insert_resource(GameState::default());
     app.add_systems(Update, update_gamestate);
     app.add_plugins(NineBallRuleset);
-    app.add_systems(Update, send_game_ended_on_exit );
+    
     app.run();
 }
 
@@ -600,7 +600,8 @@ impl Plugin for GameMode {
         .add_event::<ComputerPlayerMoveStart>()
         .add_event::<ShotMade>()
            .add_event::<ShotCompletedPhysics>()
-           .add_systems(Update, game_ended_event_reader);
+           .add_systems(Update, game_ended_event_reader)
+           .add_systems(Update, send_game_ended_on_exit );
 
     }
     
@@ -897,7 +898,7 @@ fn tabulate_for_nine_ball( mut first_contact: ResMut<NextState<FirstContactHasBe
         next_phase.set(GamePhase::PreShot);
     }
 
-    if change_shooter || is_scratch.get().0 {
+    if change_shooter || is_scratch.get().0 || *check_first_contact.get() == FirstContactHasBeenMade::NotYet{
         match current_shooter.get() {
             WhoseMove::Player1 => next_shooter.set(WhoseMove::Player2),
             WhoseMove::Player2 => next_shooter.set(WhoseMove::Player1),
@@ -943,6 +944,7 @@ fn send_game_ended_on_exit(
     }
         }
     }
+    
 }
 
 //run before tabulate
