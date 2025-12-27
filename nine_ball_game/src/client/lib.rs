@@ -322,6 +322,10 @@ fn render_gamestate(mut exit: EventWriter<AppExit>, mut commands: Commands, game
         }
     }
 
+    if gamestate.balls.is_empty() {
+        return;
+    }
+
     //remove pocketed balls from stale client render
 
     for (entity, pool_ball) in pool_ball_query.iter() {
