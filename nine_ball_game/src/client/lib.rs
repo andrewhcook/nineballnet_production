@@ -308,7 +308,7 @@ fn should_show_ball_in_hand(gamestate: Res<GameState>) -> bool {
 
 // --- Network and State Handling ---
 
-fn render_gamestate(mut exit: EventWriter<AppExit>, mut commands: Commands, gamestate: Res<GameState>, cue_ball_query: Query<Entity, With<CueBall>>, pool_ball_query: Query<(Entity, &PoolBalls)>) {
+fn render_gamestate(mut exit: EventWriter<AppExit>, mut commands: Commands, gamestate: Res<GameState>, cue_ball_query: Query<Entity, With<CueBall>>, pool_ball_query: Query<(Entity, &PoolBalls)>, floating_number_query: Query<(Entity, &FloatingNumber)>) {
      
      for i in &gamestate.balls{
         if i.is_cue {
@@ -336,6 +336,9 @@ fn render_gamestate(mut exit: EventWriter<AppExit>, mut commands: Commands, game
 
     // If it does NOT exist on the server, it has been pocketed. Despawn it locally.
     if !exists_on_server {
+        if let Some((floating_number_entity, number_itself)) = floating_number_query.iter().find(|(entity, number)| number.0 as u32 == pool_ball.0) {
+            commands.entity(floating_number_entity).despawn_recursive();
+        }
         commands.entity(entity).despawn_recursive();
     }
 }
@@ -611,6 +614,8 @@ fn rotate_numbers_around_pool_balls(mut commands: Commands, mut number_query: Qu
         counter += 0.2 
     }
 }
+
+//rewrite to treat FloatingNumber as component and insert them into the appropriate entity
 
 fn show_numbers_above_pool_balls(mut commands: Commands, mut ball_query: Query<(Entity, &Transform, &PoolBalls)>, mut floater_query: Query<(&mut Transform, &FloatingNumber), Without<PoolBalls>>) {
     for (pool_ball_entity,  pool_ball_transform, pool_ball_itself) in ball_query.iter_mut() {
