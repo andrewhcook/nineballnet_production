@@ -308,12 +308,21 @@ fn should_show_ball_in_hand(gamestate: Res<GameState>) -> bool {
 
 // --- Network and State Handling ---
 
-fn render_gamestate(mut exit: EventWriter<AppExit>, mut commands: Commands, gamestate: Res<GameState>, cue_ball_query: Query<Entity, With<CueBall>>, pool_ball_query: Query<(Entity, &PoolBalls)>, floating_number_query: Query<(Entity, &FloatingNumber)>) {
+fn render_gamestate(mut meshes: ResMut<Assets<Mesh>>,   mut materials: ResMut<Assets<StandardMaterial>>, mut exit: EventWriter<AppExit>, mut commands: Commands, gamestate: Res<GameState>, cue_ball_query: Query<Entity, With<CueBall>>, pool_ball_query: Query<(Entity, &PoolBalls)>, floating_number_query: Query<(Entity, &FloatingNumber)>) {
      
      for i in &gamestate.balls{
         if i.is_cue {
-            let cue_ball = cue_ball_query.single();
-            commands.entity(cue_ball).insert(TransformBundle::from_transform(Transform {translation: i.position, rotation: i.rotation, ..default()}));
+            if let Ok(cue_ball) = cue_ball_query.get_single() {
+
+                commands.entity(cue_ball).insert(TransformBundle::from_transform(Transform {translation: Vec3::Y * 4.0,  ..default()}));
+            } else {
+                 commands.spawn(CueBall).insert(MaterialMeshBundle {
+        mesh: meshes.add(Sphere::new(CUE_BALL_RADIUS)), 
+        material: materials.add(StandardMaterial::from_color(WHITE)), 
+        ..default()
+    }).insert(Collider::ball(CUE_BALL_RADIUS)).insert(Sensor).insert(TransformBundle::from_transform(Transform {translation: i.position, rotation: i.rotation, ..default()}));
+            }
+
         } else {
         if let Some( pool_ball )= pool_ball_query.iter().find(|(entity, pool_ball)| pool_ball.0 as u32 == i.number) {
            
@@ -321,6 +330,8 @@ fn render_gamestate(mut exit: EventWriter<AppExit>, mut commands: Commands, game
         } 
         }
     }
+
+
 
     if gamestate.balls.is_empty() {
         return;
