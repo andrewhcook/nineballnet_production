@@ -5,9 +5,9 @@
     <div id="lobby-app" class="max-w-4xl mx-auto bg-white dark:bg-gray-800 rounded-lg shadow-xl overflow-hidden border border-gray-200 dark:border-gray-700 font-sans">
         
         <div class="flex border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
-            <button class="flex-1 py-3 text-sm font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors">Quick Pairing</button>
+            <button onclick="createGame()" class="flex-1 py-3 text-sm font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800">Quick Pairing</button>
             <button class="flex-1 py-3 text-sm font-bold text-blue-600 border-b-2 border-blue-600 dark:text-blue-400 bg-white dark:bg-gray-800">Lobby</button>
-            <button class="flex-1 py-3 text-sm font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors">Correspondence</button>
+            <button class="flex-1 py-3 text-sm font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors hover:bg-gray-100 dark:hover:bg-gray-800">Correspondence</button>
         </div>
 
         <div class="flex justify-between items-center px-4 py-2 border-b border-gray-100 dark:border-gray-700 bg-white dark:bg-gray-800">
@@ -16,6 +16,15 @@
             </div>
             <div class="text-xs text-gray-400 uppercase tracking-wide font-semibold">
                 {{ games | length }} Players Waiting
+            </div>
+        </div>
+
+        <div id="status-container" class="hidden bg-blue-50 dark:bg-blue-900/20 p-4 border-b border-blue-100 dark:border-blue-800 transition-all">
+            <div class="flex items-center justify-center space-x-3">
+                <div id="loader" class="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+                <p id="status-text" class="text-sm text-blue-800 dark:text-blue-200 font-medium">
+                    Initializing search...
+                </p>
             </div>
         </div>
 
@@ -36,7 +45,7 @@
                         <tr>
                             <td colspan="5" class="p-8 text-center text-gray-500 dark:text-gray-400">
                                 No open games found. 
-                                <button onclick="createGame()" class="text-blue-600 hover:underline ml-1">Create one?</button>
+                                <button onclick="createGame()" class="text-blue-600 hover:underline ml-1 font-medium">Create one?</button>
                             </td>
                         </tr>
                     {% else %}
@@ -85,13 +94,119 @@
             </table>
         </div>
     </div>
+
+    <div id="game-view" class="hidden fixed inset-0 bg-black z-50 flex items-center justify-center">
+        <canvas id="nineball-canvas" class="max-w-full max-h-full shadow-2xl"></canvas>
+        <div id="overlay-status" class="absolute top-4 left-4 text-white bg-black bg-opacity-50 px-3 py-1 rounded text-sm font-mono">
+            Initializing Wasm Engine...
+        </div>
+    </div>
 </div>
 
-<script>
-    function joinGame(id) {
-        // Your logic to join the specific game ID
-        console.log("Requesting join for game:", id);
-        // fetch(`/api/matches/${id}/join`, ...);
+<script type="module">
+    // 1. Setup & Imports
+    const userToken = "{{ token }}";
+    import init, { run_game } from '/nineball_wasm.js';
+
+    let isPolling = false;
+
+    // 2. The Matchmaking Logic (Mapped to 'createGame' for the UI button)
+    async function createGame() {
+        const statusContainer = document.getElementById('status-container');
+        const statusText = document.getElementById('status-text');
+        const loader = document.getElementById('loader');
+
+        // Show UI Feedback
+        statusContainer.classList.remove('hidden');
+        statusText.innerText = "Searching for an available match server...";
+
+        try {
+            // Tell Loco to start the matchmaking worker
+            const response = await fetch('/api/matchmaking/find', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${userToken}`
+                },
+                body: JSON.stringify({ /* params */ })
+            });
+
+            if (!response.ok) throw new Error("Could not start matchmaking");
+
+            // Begin polling
+            startPolling();
+        } catch (err) {
+            console.error(err);
+            statusText.innerText = "Error starting matchmaking. Try again.";
+            loader.classList.add('hidden'); // Stop spinner
+        }
     }
+
+    // 3. Polling Logic
+    function startPolling() {
+        if (isPolling) return;
+        isPolling = true;
+
+        const poll = async () => {
+            try {
+                const response = await fetch('/api/matchmaking/status');
+                
+                if (response.ok) {
+                    const text = await response.text();
+                    
+                    if (text === "searching") {
+                        setTimeout(poll, 1500);
+                    } else {
+                        // Match Found
+                        const ticket = JSON.parse(text);
+                        handleMatchFound(ticket);
+                    }
+                }
+            } catch (err) {
+                console.warn("Polling error, retrying...", err);
+                setTimeout(poll, 3000);
+            }
+        };
+
+        poll();
+    }
+
+    // 4. Game Start Logic
+    async function handleMatchFound(ticket) {
+        console.log("Match Found! Handoff Ticket:", ticket);
+        
+        const overlay = document.getElementById('overlay-status');
+        const gameView = document.getElementById('game-view');
+        const lobbyApp = document.getElementById('lobby-app'); // To hide lobby if needed
+
+        // Hide Lobby, Show Game
+        // lobbyApp.classList.add('hidden'); // Optional: Hide the lobby UI
+        gameView.classList.remove('hidden');
+        
+        try {
+            overlay.innerText = "Connecting to Game Server...";
+            await init(); 
+
+            overlay.innerText = ""; 
+            
+            // Hand off to Wasm
+            run_game("nineball-canvas", ticket.gateway_url, ticket.handoff_token);
+
+        } catch (err) {
+            console.error("Wasm failure:", err);
+            overlay.innerText = "Error loading game engine.";
+        }
+    }
+
+    // 5. Join Specific Game Logic (Placeholder for the table rows)
+    async function joinGame(id) {
+        console.log("Joining specific game:", id);
+        // Implement specific join logic here, or reuse createGame logic if appropriate
+        // e.g., await fetch(`/api/matches/${id}/join`, ...);
+    }
+
+    // Attach to window so HTML onclick="..." works
+    window.createGame = createGame;
+    window.joinGame = joinGame;
 </script>
 {% endblock %}
