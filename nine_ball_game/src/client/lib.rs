@@ -314,7 +314,7 @@ fn render_gamestate(mut meshes: ResMut<Assets<Mesh>>,   mut materials: ResMut<As
         if i.is_cue {
             if let Ok(cue_ball) = cue_ball_query.get_single() {
 
-                commands.entity(cue_ball).insert(TransformBundle::from_transform(Transform {translation: i.position,  ..default()}));
+                commands.entity(cue_ball).insert(TransformBundle::from_transform(Transform {translation: i.position, rotation: i.rotation, ..default()}));
             } 
 
         } else {
@@ -348,19 +348,15 @@ fn render_gamestate(mut meshes: ResMut<Assets<Mesh>>,   mut materials: ResMut<As
     }
 }
 
-for i in &gamestate.balls {
-    if i.is_cue {
-        if let Ok(cue_ball) = cue_ball_query.get_single() {
 
-        } else {
+    let cue_exists_on_server = gamestate.balls.iter().any(|ball_data| ball_data.is_cue);
+    if !cue_exists_on_server || gamestate.phase == GamePhase::BallInHand{
             commands.spawn(CueBall).insert(MaterialMeshBundle {
         mesh: meshes.add(Sphere::new(CUE_BALL_RADIUS)), 
         material: materials.add(StandardMaterial::from_color(WHITE)), 
         ..default()
-    }).insert(Collider::ball(CUE_BALL_RADIUS)).insert(Sensor).insert(TransformBundle::from_transform(Transform {translation: Vec3::Y * 4.0, rotation: i.rotation, ..default()}));
+    }).insert(Collider::ball(CUE_BALL_RADIUS)).insert(Sensor).insert(TransformBundle::from_transform(Transform {translation: Vec3::Y * 4.0, ..default()}));
 
-        }
-    }
 }
 
     
