@@ -314,14 +314,8 @@ fn render_gamestate(mut meshes: ResMut<Assets<Mesh>>,   mut materials: ResMut<As
         if i.is_cue {
             if let Ok(cue_ball) = cue_ball_query.get_single() {
 
-                commands.entity(cue_ball).insert(TransformBundle::from_transform(Transform {translation: Vec3::Y * 4.0,  ..default()}));
-            } else {
-                 commands.spawn(CueBall).insert(MaterialMeshBundle {
-        mesh: meshes.add(Sphere::new(CUE_BALL_RADIUS)), 
-        material: materials.add(StandardMaterial::from_color(WHITE)), 
-        ..default()
-    }).insert(Collider::ball(CUE_BALL_RADIUS)).insert(Sensor).insert(TransformBundle::from_transform(Transform {translation: i.position, rotation: i.rotation, ..default()}));
-            }
+                commands.entity(cue_ball).insert(TransformBundle::from_transform(Transform {translation: i.position,  ..default()}));
+            } 
 
         } else {
         if let Some( pool_ball )= pool_ball_query.iter().find(|(entity, pool_ball)| pool_ball.0 as u32 == i.number) {
@@ -351,6 +345,21 @@ fn render_gamestate(mut meshes: ResMut<Assets<Mesh>>,   mut materials: ResMut<As
             commands.entity(floating_number_entity).despawn_recursive();
         }
         commands.entity(entity).despawn_recursive();
+    }
+}
+
+for i in &gamestate.balls {
+    if i.is_cue {
+        if let Ok(cue_ball) = cue_ball_query.get_single() {
+
+        } else {
+            commands.spawn(CueBall).insert(MaterialMeshBundle {
+        mesh: meshes.add(Sphere::new(CUE_BALL_RADIUS)), 
+        material: materials.add(StandardMaterial::from_color(WHITE)), 
+        ..default()
+    }).insert(Collider::ball(CUE_BALL_RADIUS)).insert(Sensor).insert(TransformBundle::from_transform(Transform {translation: Vec3::Y * 4.0, rotation: i.rotation, ..default()}));
+
+        }
     }
 }
 
