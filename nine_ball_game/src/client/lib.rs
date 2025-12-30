@@ -83,48 +83,50 @@ struct SpinSelector;
 #[derive(Component)]
 struct SecondWindow;
 
+const DEFAULT_WALL_COLOR: Color = Color::Hsla(Hsla::new(15.0, 0.65, 0.20, 1.0));
 
+const DEFAULT_FELT_COLOR: Color = Color::Hsla(Hsla::new(210.0, 0.65, 0.45, 1.0));
 
 fn setup_physics(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>,   mut materials: ResMut<Assets<StandardMaterial>>, mut fonts: ResMut<Assets<Font>>, ) {
     commands
     .spawn(RigidBody::Fixed)
       //  .insert(Friction{coefficient: FRICTION_COEFF, combine_rule: CoefficientCombineRule::Average})
-      .insert(MaterialMeshBundle {mesh: meshes.add(Cuboid::from_corners(Vec3::new(2.25, 0.0, 4.5), Vec3::new(-2.25, 0.0, -4.5))), material: materials.add(StandardMaterial::from_color(Color::Hsla(Hsla::new(120.0 , 0.68, 0.93, 1.0)))), ..default()})
+      .insert(MaterialMeshBundle {mesh: meshes.add(Cuboid::from_corners(Vec3::new(2.25, 0.0, 4.5), Vec3::new(-2.25, 0.0, -4.5))), material: materials.add(StandardMaterial::from_color(DEFAULT_FELT_COLOR)), ..default()})
         .insert(TransformBundle::from(Transform::from_xyz(0.0, 0.0, 0.0)));
 
 
       commands
     .spawn(RigidBody::Fixed)
       //  .insert(Friction{coefficient: FRICTION_COEFF, combine_rule: CoefficientCombineRule::Average})
-      .insert(MaterialMeshBundle {mesh: meshes.add(Cuboid::from_corners(Vec3::new(12.25, 0.0, 14.5), Vec3::new(-12.25, 0.0, -14.5))), material: materials.add(StandardMaterial::from_color(Color::Hsla(Hsla::new(120.0 , 0.68, 0.93, 1.0)))), ..default()})
+      .insert(MaterialMeshBundle {mesh: meshes.add(Cuboid::from_corners(Vec3::new(12.25, 0.0, 14.5), Vec3::new(-12.25, 0.0, -14.5))), material: materials.add(StandardMaterial::from_color(DEFAULT_FELT_COLOR)), ..default()})
         .insert(TransformBundle::from(Transform::from_xyz(0.0, 3.0, 0.0)));
 
     //create the walls
     commands
     .spawn(RigidBody::Fixed)
-    .insert(MaterialMeshBundle {mesh: meshes.add(WALL_MESH_DIMENSIONS), material: materials.add(StandardMaterial::from_color(Color::Hsla(Hsla::new(30.0 ,0.60, 0.20, 1.0)))), ..default()})
+    .insert(MaterialMeshBundle {mesh: meshes.add(WALL_MESH_DIMENSIONS), material: materials.add(StandardMaterial::from_color(DEFAULT_WALL_COLOR)), ..default()})
     .insert(TransformBundle::from_transform(Transform::from_translation(Vec3::new(TABLE_WIDTH, 0.0, TABLE_WIDTH))));
 
     commands
     .spawn(RigidBody::Fixed)
-    .insert(MaterialMeshBundle {mesh: meshes.add(WALL_MESH_DIMENSIONS), material: materials.add(StandardMaterial::from_color(Color::Hsla(Hsla::new(30.0 ,0.60, 0.20, 1.0)))), ..default()})
+    .insert(MaterialMeshBundle {mesh: meshes.add(WALL_MESH_DIMENSIONS), material: materials.add(StandardMaterial::from_color(DEFAULT_WALL_COLOR)), ..default()})
     .insert(TransformBundle::from_transform(Transform::from_translation(Vec3::new(TABLE_WIDTH, 0.0, -TABLE_WIDTH))));
 commands
     .spawn(RigidBody::Fixed)
-    .insert(MaterialMeshBundle {mesh: meshes.add(WALL_MESH_DIMENSIONS), material: materials.add(StandardMaterial::from_color(Color::Hsla(Hsla::new(30.0 ,0.60, 0.20, 1.0)))), ..default()})
+    .insert(MaterialMeshBundle {mesh: meshes.add(WALL_MESH_DIMENSIONS), material: materials.add(StandardMaterial::from_color(DEFAULT_WALL_COLOR)), ..default()})
     .insert(TransformBundle::from_transform(Transform::from_translation(Vec3::new(-TABLE_WIDTH, 0.0, TABLE_WIDTH))));
 
     commands
     .spawn(RigidBody::Fixed)
-    .insert(MaterialMeshBundle {mesh: meshes.add(WALL_MESH_DIMENSIONS), material: materials.add(StandardMaterial::from_color(Color::Hsla(Hsla::new(30.0 ,0.60, 0.20, 1.0)))), ..default()})
+    .insert(MaterialMeshBundle {mesh: meshes.add(WALL_MESH_DIMENSIONS), material: materials.add(StandardMaterial::from_color(DEFAULT_WALL_COLOR)), ..default()})
     .insert(TransformBundle::from_transform(Transform::from_translation(Vec3::new(-TABLE_WIDTH, 0.0, -TABLE_WIDTH))));
     commands
     .spawn(RigidBody::Fixed)
-    .insert(MaterialMeshBundle {mesh: meshes.add(BACK_WALL_MESH_DIMENSIONS), material: materials.add(StandardMaterial::from_color(Color::Hsla(Hsla::new(30.0 ,0.60, 0.20, 1.0)))), ..default()})
+    .insert(MaterialMeshBundle {mesh: meshes.add(BACK_WALL_MESH_DIMENSIONS), material: materials.add(StandardMaterial::from_color(DEFAULT_WALL_COLOR)), ..default()})
     .insert(TransformBundle::from_transform(Transform::from_translation(Vec3::new(0.0, 0.0, -TABLE_LENGTH))));
     commands
     .spawn(RigidBody::Fixed)
-    .insert(MaterialMeshBundle {mesh: meshes.add(BACK_WALL_MESH_DIMENSIONS), material: materials.add(StandardMaterial::from_color(Color::Hsla(Hsla::new(30.0 ,0.60, 0.20, 1.0)))), ..default()})
+    .insert(MaterialMeshBundle {mesh: meshes.add(BACK_WALL_MESH_DIMENSIONS), material: materials.add(StandardMaterial::from_color(DEFAULT_WALL_COLOR)), ..default()})
     .insert(TransformBundle::from_transform(Transform::from_translation(Vec3::new(0.0, 0.0, TABLE_LENGTH))));
 
     //make aimer
@@ -132,9 +134,9 @@ commands
     commands.spawn(Aimer).insert(Sensor);
     
  //   commands.spawn(TargetBallTorus)
-   // .insert(MaterialMeshBundle{mesh: meshes.add(TARGET_BALL_TORUS_DIMENSIONS), material: materials.add(StandardMaterial::from_color(Color::Hsla(Hsla::new(30.0 ,0.60, 0.20, 1.0)))), ..default()});
+   // .insert(MaterialMeshBundle{mesh: meshes.add(TARGET_BALL_TORUS_DIMENSIONS), material: materials.add(StandardMaterial::from_color(DEFAULT_WALL_COLOR)), ..default()});
 
-   // commands.spawn(TargetBallTorus).insert(MaterialMeshBundle{mesh: meshes.add(TARGET_BALL_TORUS_DIMENSIONS), material: materials.add(StandardMaterial::from_color(Color::Hsla(Hsla::new(30.0 ,0.60, 0.20, 1.0)))), ..default()});;
+   // commands.spawn(TargetBallTorus).insert(MaterialMeshBundle{mesh: meshes.add(TARGET_BALL_TORUS_DIMENSIONS), material: materials.add(StandardMaterial::from_color(DEFAULT_WALL_COLOR)), ..default()});;
 
 }
 
