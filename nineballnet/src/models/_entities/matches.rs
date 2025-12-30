@@ -9,7 +9,7 @@ pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i32,
     pub match_id: Uuid,
-    pub player_id: Uuid,
+    pub player_id: Uuid, // This is the Foreign Key we are linking
     pub status: String,
     pub gateway_url: Option<String>,
     #[sea_orm(column_type = "Text", nullable)]
@@ -19,4 +19,21 @@ pub struct Model {
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {}
+pub enum Relation {
+    // 1. Define the relationship: A Match belongs to a User
+    #[sea_orm(
+        belongs_to = "super::users::Entity",
+        from = "Column::PlayerId",      // Column in this table (matches)
+        to = "super::users::Column::Pid", // Column in target table (users)
+        on_update = "Cascade",
+        on_delete = "Cascade"
+    )]
+    Users,
+}
+
+// 2. Implement the Trait so helper functions know how to join them
+impl Related<super::users::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Users.def()
+    }
+}
