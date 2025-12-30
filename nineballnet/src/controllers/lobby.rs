@@ -70,7 +70,7 @@ pub async fn index(
     // We pass 'games' for the table, and 'token' for the JS buttons
     format::render().view(
         &v, 
-        "assets/views/home/lobby_visualized", // Ensure this path matches where you saved the HTML file!
+        "assets/views/home/lobby_visualized.html", // Ensure this path matches where you saved the HTML file!
         json!({
             "games": games,
             "token": raw_token,
