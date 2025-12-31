@@ -197,10 +197,46 @@
 
     // 5. Join Specific Game Logic (Placeholder for the table rows)
     async function joinGame(id) {
-        console.log("Joining specific game:", id);
-        // Implement specific join logic here, or reuse createGame logic if appropriate
-        // e.g., await fetch(`/api/matches/${id}/join`, ...);
+        console.log("Requesting join for game:", id);
+        
+        // 1. UI Feedback: Change cursor to indicate loading
+        document.body.style.cursor = 'wait';
+
+        try {
+            // 2. Call the API
+            const response = await fetch('/api/matchmaking/join', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    // Note: Cookies are sent automatically by the browser, 
+                    // so we don't need the 'Authorization' header here.
+                },
+                body: JSON.stringify({ match_id: id })
+            });
+
+            if (!response.ok) {
+                // Attempt to read the error message from the server
+                const errorText = await response.text();
+                throw new Error(errorText || "Server refused join request");
+            }
+
+            // 3. Success! Get the connection ticket
+            const ticket = await response.json();
+            
+            // 4. Reuse existing logic to switch view and launch WASM
+            await handleMatchFound(ticket);
+
+        } catch (err) {
+            console.error("Join failed:", err);
+            alert("Could not join game: " + err.message);
+        } finally {
+            // Reset cursor
+            document.body.style.cursor = 'default';
+        }
     }
+
+    // CRITICAL: Ensure this is attached to window so the HTML onclick="..." can see it
+    window.joinGame = joinGame;
 
     // Attach to window so HTML onclick="..." works
     window.createGame = createGame;
