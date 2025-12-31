@@ -38,7 +38,6 @@
                     </tr>
                 </thead>
                 <tbody class="text-sm">
-                    
                     {% if games | length == 0 %}
                         <tr>
                             <td colspan="5" class="p-8 text-center text-gray-500 dark:text-gray-400">
@@ -47,7 +46,6 @@
                             </td>
                         </tr>
                     {% else %}
-                        
                         {% for game in games %}
                         <tr onclick="joinGame('{{ game.id }}')" 
                             class="group border-b border-gray-100 dark:border-gray-700 hover:bg-blue-50 dark:hover:bg-blue-900/20 cursor-pointer transition-colors">
@@ -58,183 +56,110 @@
                                     title="{{ game.status }}">
                                 </span>
                             </td>
-
                             <td class="p-3 font-medium text-gray-900 dark:text-gray-100 group-hover:text-blue-600">
                                 {{ game.host_name }}
                             </td>
-
                             <td class="p-3 text-gray-600 dark:text-gray-300">
-                                {{ game.host_rating }}
-                                {% if game.rating_provisional %}?{% endif %}
+                                {{ game.host_rating }} {% if game.rating_provisional %}?{% endif %}
                             </td>
-
                             <td class="p-3 text-gray-600 dark:text-gray-300">
                                 {{ game.config_description }}
                             </td>
-
                             <td class="p-3 text-right">
                                 {% if game.is_rated %}
-                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
-                                        Rated
-                                    </span>
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">Rated</span>
                                 {% else %}
-                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300">
-                                        Casual
-                                    </span>
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300">Casual</span>
                                 {% endif %}
                             </td>
                         </tr>
                         {% endfor %}
-                    
                     {% endif %}
-
                 </tbody>
             </table>
         </div>
     </div>
 
     <div id="game-view" class="hidden fixed inset-0 bg-black z-50 flex items-center justify-center">
-        <canvas id="nineball-canvas" class="max-w-full max-h-full shadow-2xl"></canvas>
+        <canvas id="nineball-canvas" class="max-w-full max-h-full shadow-2xl focus:outline-none" tabindex="0"></canvas>
+        
         <div id="overlay-status" class="absolute top-4 left-4 text-white bg-black bg-opacity-50 px-3 py-1 rounded text-sm font-mono">
             Initializing Wasm Engine...
+        </div>
+
+        <div id="game-over-modal" class="hidden absolute inset-0 bg-black bg-opacity-90 flex flex-col items-center justify-center z-50">
+            <h2 class="text-4xl font-bold text-white mb-4">Game Over</h2>
+            <div class="flex space-x-4">
+                <button onclick="handlePlayAgain()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-8 rounded-lg border border-blue-500">
+                    Play Again
+                </button>
+                <button onclick="handleReturnToLobby()" class="bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 px-8 rounded-lg border border-gray-600">
+                    Lobby
+                </button>
+            </div>
         </div>
     </div>
 </div>
 
 <script type="module">
-        // 1. Setup & Imports
     const userToken = "{{ token }}";
     import init, { run_game } from '/nineball_wasm.js';
 
     let isPolling = false;
 
-    // --- NEW: AUTO-RECONNECT ON LOAD ---
+    // --- 1. GLOBAL EXPORTS ---
+    window.createGame = createGame;
+    window.joinGame = joinGame;
+    window.handlePlayAgain = handlePlayAgain;
+    window.handleReturnToLobby = handleReturnToLobby;
+    window.onGameFinished = showGameOver;
+
+    // --- 2. AUTO-RECONNECT ON LOAD ---
     document.addEventListener('DOMContentLoaded', async () => {
-        console.log("Checking for existing session...");
-        
         try {
-            const timestamp = new Date().getTime();
-            const response = await fetch(`/api/matchmaking/status?t=${timestamp}`);
+            const t = new Date().getTime();
+            const response = await fetch(`/api/matchmaking/status?t=${t}`, {
+                headers: { 'Authorization': `Bearer ${userToken}` }
+            });
             
             if (response.ok) {
                 const text = await response.text();
-                
-                if (text === "idle") {
-                    console.log("User is idle.");
-                    // Do nothing, show the "Find Match" button normally
-                } 
-                else if (text === "searching") {
-                    console.log("User was searching. Resuming poll...");
-                    // Restore "Searching" UI state
-                    document.getElementById('find-match-btn').classList.add('hidden');
-                    document.getElementById('loader').classList.remove('hidden');
-                    document.getElementById('status-text').innerText = "Resuming search...";
-                    
-                    // Restart the loop
+                if (text === "searching") {
+                    console.log("Resuming search...");
+                    setUIState('searching');
                     startPolling();
-                } 
-                else {
-                    // It's JSON! The user was already in a READY game.
-                    console.log("Reconnecting to active match!");
+                } else if (text !== "idle" && text !== "finished") {
+                    console.log("Reconnecting to match...");
                     const ticket = JSON.parse(text);
                     await handleMatchFound(ticket);
                 }
             }
-        } catch (err) {
-            console.error("Auto-connect failed:", err);
-        }
+        } catch (err) { console.error("Auto-connect failed:", err); }
     });
 
-    // 2. The Matchmaking Logic (Mapped to 'createGame' for the UI button)
+    // --- 3. CREATE GAME (Random Match) ---
     async function createGame() {
-        const statusContainer = document.getElementById('status-container');
-        const statusText = document.getElementById('status-text');
-        const loader = document.getElementById('loader');
-
-        // Show UI Feedback
-        statusContainer.classList.remove('hidden');
-        statusText.innerText = "Searching for an available match server...";
-
+        setUIState('searching');
         try {
-            // Tell Loco to start the matchmaking worker
             const response = await fetch('/api/matchmaking/find', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${userToken}`
-                },
-                body: JSON.stringify({ /* params */ })
+                }
             });
 
-            if (!response.ok) throw new Error("Could not start matchmaking");
-
-            // Begin polling
+            if (!response.ok) throw new Error("Search failed");
             startPolling();
         } catch (err) {
             console.error(err);
-            statusText.innerText = "Error starting matchmaking. Try again.";
-            loader.classList.add('hidden'); // Stop spinner
+            setUIState('idle', "Error starting search.");
         }
     }
 
-    // 3. Polling Logic
-    function startPolling() {
-        if (isPolling) return;
-        isPolling = true;
-
-        const poll = async () => {
-            try {
-                const response = await fetch('/api/matchmaking/status');
-                
-                if (response.ok) {
-                    const text = await response.text();
-                    
-                    if (text === "searching") {
-                        setTimeout(poll, 1500);
-                    } else {
-                        // Match Found
-                        const ticket = JSON.parse(text);
-                        handleMatchFound(ticket);
-                    }
-                }
-            } catch (err) {
-                console.warn("Polling error, retrying...", err);
-                setTimeout(poll, 3000);
-            }
-        };
-
-        poll();
-    }
-
-    // 4. Game Start Logic
-    async function handleMatchFound(ticket) {
-        console.log("Match Found! Handoff Ticket:", ticket);
-        
-        const overlay = document.getElementById('overlay-status');
-        const gameView = document.getElementById('game-view');
-        const lobbyApp = document.getElementById('lobby-app'); // To hide lobby if needed
-
-        // Hide Lobby, Show Game
-        // lobbyApp.classList.add('hidden'); // Optional: Hide the lobby UI
-        gameView.classList.remove('hidden');
-        
-        try {
-            overlay.innerText = "Connecting to Game Server...";
-            await init(); 
-
-            overlay.innerText = ""; 
-            
-            // Hand off to Wasm
-            run_game("nineball-canvas", ticket.gateway_url, ticket.handoff_token);
-
-        } catch (err) {
-            console.error("Wasm failure:", err);
-        }
-    }
-
-    // 5. Join Specific Game Logic (Placeholder for the table rows)
-    async function joinGame(id) {
-        console.log("Requesting join for game:", id);
+    // --- 4. JOIN GAME (Specific) ---
+    async function joinGame(matchId) {
+        console.log("Joining:", matchId);
         document.body.style.cursor = 'wait';
 
         try {
@@ -242,31 +167,108 @@
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    // ADD THIS HEADER:
-                    'Authorization': `Bearer ${userToken}` 
+                    'Authorization': `Bearer ${userToken}` // Auth Header for Join
                 },
-                body: JSON.stringify({ match_id: id })
+                body: JSON.stringify({ match_id: matchId })
             });
 
             if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(errorText || "Server refused join request");
+                const txt = await response.text();
+                throw new Error(txt);
             }
 
             const ticket = await response.json();
             await handleMatchFound(ticket);
 
         } catch (err) {
-            console.error("Join failed:", err);
-            alert("Could not join game: " + err.message);
+            alert("Join failed: " + err.message);
         } finally {
             document.body.style.cursor = 'default';
         }
     }
 
+    // --- 5. POLLING LOOP ---
+    function startPolling() {
+        if (isPolling) return;
+        isPolling = true;
 
-    // Attach to window so HTML onclick="..." works
-    window.createGame = createGame;
-    window.joinGame = joinGame;
+        const poll = async () => {
+            if (!isPolling) return;
+            try {
+                const t = new Date().getTime();
+                const response = await fetch(`/api/matchmaking/status?t=${t}`, {
+                    headers: { 'Authorization': `Bearer ${userToken}` }
+                });
+                
+                if (response.ok) {
+                    const text = await response.text();
+                    if (text === "searching") {
+                        setTimeout(poll, 1500);
+                    } else if (text === "idle" || text === "finished") {
+                        isPolling = false;
+                        setUIState('idle');
+                    } else {
+                        isPolling = false;
+                        try {
+                            const ticket = JSON.parse(text);
+                            await handleMatchFound(ticket);
+                        } catch(e) { setTimeout(poll, 1500); }
+                    }
+                } else { setTimeout(poll, 3000); }
+            } catch (err) { setTimeout(poll, 3000); }
+        };
+        poll();
+    }
+
+    // --- 6. GAME LAUNCH ---
+    async function handleMatchFound(ticket) {
+        document.getElementById('status-text').innerText = "Match Found! Connecting...";
+        document.getElementById('game-view').classList.remove('hidden');
+        document.getElementById('overlay-status').innerText = "Connecting...";
+
+        try {
+            await init(); 
+            await run_game("nineball-canvas", ticket.gateway_url, ticket.handoff_token);
+            showGameOver();
+        } catch (e) {
+            console.error(e);
+            alert("Game Engine Error");
+            handleReturnToLobby();
+        }
+    }
+
+    // --- 7. GAME OVER LOGIC ---
+    function showGameOver() {
+        document.getElementById('game-over-modal').classList.remove('hidden');
+    }
+
+    async function handlePlayAgain() {
+        document.getElementById('game-over-modal').classList.add('hidden');
+        document.getElementById('game-view').classList.add('hidden');
+        // Implicitly archives old game via backend logic
+        await createGame(); 
+    }
+
+    async function handleReturnToLobby() {
+        try {
+            await fetch('/api/matchmaking/leave', { 
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${userToken}` }
+            });
+        } catch(e) {}
+        window.location.reload();
+    }
+
+    function setUIState(state, msg = "Initializing search...") {
+        const container = document.getElementById('status-container');
+        const txt = document.getElementById('status-text');
+        
+        if (state === 'searching') {
+            container.classList.remove('hidden');
+            txt.innerText = msg;
+        } else {
+            container.classList.add('hidden');
+        }
+    }
 </script>
 {% endblock %}

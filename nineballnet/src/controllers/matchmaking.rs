@@ -183,6 +183,66 @@ pub async fn join(
         handoff_token: p2_token,
     })
 }
+
+
+
+// POST /api/matchmaking/leave
+pub async fn leave(
+    auth: auth::JWT,
+    State(ctx): State<AppContext>,
+) -> Result<Response> {
+    let player_id = Uuid::parse_str(&auth.claims.pid).map_err(|_| {
+        Error::BadRequest("Invalid player ID".to_string())
+    })?;
+
+    // 1. Find the Active Game
+    let active_game = Matches::find()
+        .filter(matches::Column::PlayerId.eq(player_id))
+        .filter(
+            Condition::any()
+                .add(matches::Column::Status.eq("ready"))
+                .add(matches::Column::Status.eq("searching"))
+                .add(matches::Column::Status.eq("open"))
+        )
+        .one(&ctx.db)
+        .await
+        .map_err(|e| Error::DB(e))?;
+
+    if let Some(game) = active_game {
+        // 2. Extract the Handoff Token (The specific game password)
+        // If it's somehow missing (legacy data), we can't secure the call, so we skip it.
+        if let Some(token) = &game.handoff_token {
+            let allocator_url = std::env::var("ALLOCATOR_URL")
+                .unwrap_or_else(|_| "http://localhost:10000".to_string());
+            
+            tracing::info!("LEAVE: Requesting deallocation for match {}", game.match_id);
+
+            let client = reqwest::Client::new();
+            
+            // NEW: Send the token in the payload
+            let _ = client.post(format!("{}/deallocate", allocator_url))
+                .json(&serde_json::json!({
+                    "match_id": game.match_id.to_string(),
+                    "token": token // <--- Sending Proof of Ownership
+                }))
+                .send()
+                .await
+                .map_err(|e| {
+                    tracing::error!("LEAVE WARNING: Failed to notify Allocator: {}", e);
+                });
+        }
+
+        // 3. Mark Game as Finished in DB
+        let mut active: matches::ActiveModel = game.into();
+        active.status = Set("finished".to_string());
+        active.updated_at = Set(Utc::now().naive_utc());
+        
+        active.save(&ctx.db).await.map_err(|e| Error::DB(e))?;
+    }
+
+    format::text("Left game")
+}
+
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("api/matchmaking")
