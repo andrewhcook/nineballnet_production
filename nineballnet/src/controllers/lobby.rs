@@ -32,19 +32,18 @@ pub async fn index(
     ViewEngine(v): ViewEngine<TeraView>,
     jar: CookieJar,
 ) -> Result<Response> {
-    // Check Auth
+    // ... auth check ...
     let raw_token = match jar.get("token") {
         Some(c) => c.value().to_string(),
         None => return Ok(Redirect::to("/auth/login").into_response()),
     };
 
-    // Render the "Simple" view by default
-    // Ensure your matchmaking HTML is saved as "home/lobby_matchmaking.html" (or similar)
     format::render().view(
         &v,
         "home/matchmaking.html", 
         json!({
-            "token": raw_token
+            "token": raw_token,
+            "active_tab": "pairing" // <--- ADD THIS LINE
         })
     )
 }
@@ -91,6 +90,7 @@ pub async fn browse(
         json!({
             "games": games,
             "token": raw_token,
+            "active_tab": "browse"
         })
     )
 }
