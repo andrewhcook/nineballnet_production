@@ -190,29 +190,37 @@
     }
 
     // --- 5. LAUNCH GAME ---
-    async function handleMatchFound(ticket) {
+  async function handleMatchFound(ticket) {
         document.getElementById('status-text').innerText = "Match Found! Connecting...";
         
-        // Switch to Game View
         const gameView = document.getElementById('game-view');
         gameView.classList.remove('hidden');
-        document.getElementById('overlay-status').innerText = "Starting Game Engine...";
+        document.getElementById('overlay-status').innerText = "Connecting...";
 
         try {
-            await init(); // Init WASM
+            await init(); 
             
-            document.getElementById('overlay-status').innerText = `Connecting to ${ticket.gateway_url}...`;
-            
-            // Launch WASM - this awaits until the game loop exits
+            // This promise rejects when the game exits via "control flow exception"
             await run_game("nineball-canvas", ticket.gateway_url, ticket.handoff_token);
             
-            // If the Rust code returns, the game is over
+            // If it returns normally (rare in some loops), show game over
             showGameOver();
 
         } catch (e) {
-            console.error("WASM Error:", e);
-            alert("Game Engine Failed: " + e);
-            handleReturnToLobby();
+            // --- FIX START ---
+            const errorString = String(e);
+
+            // Check if this is the "fake" error used for exiting the game loop
+            if (errorString.includes("Using exceptions for control flow")) {
+                console.log("Game exited cleanly via WASM unwind.");
+                showGameOver(); // Treat this as a valid Game Over
+            } else {
+                // This is a REAL crash (e.g., panic, memory error)
+                console.error("Critical WASM Error:", e);
+                alert("Game Engine Crashed: " + errorString);
+                handleReturnToLobby();
+            }
+            // --- FIX END ---
         }
     }
 
