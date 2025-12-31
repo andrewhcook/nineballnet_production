@@ -78,49 +78,70 @@
     let isPolling = false;
 
     // --- GLOBAL EXPORTS ---
-    window.handleFindMatch = handleFindMatch;
+    window.createGame = createGame;
+    window.joinGame = joinGame;
     window.handleReload = handleReload;
     window.onGameFinished = showGameOver;
 
+    // --- NEW: CATCH TAB CLOSE ---
+    window.addEventListener('beforeunload', () => {
+        fetch('/api/matchmaking/leave', { 
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${userToken}` },
+            keepalive: true
+        });
+    });
+
     // --- 1. START SEARCH ---
-    async function handleFindMatch() {
-        const btn = document.getElementById('find-match-btn');
-        const statusText = document.getElementById('status-text');
-        const loader = document.getElementById('loader');
-
-        // UI Update
-        btn.classList.add('hidden');
-        loader.classList.remove('hidden');
-        statusText.innerText = "Searching for an available match server...";
-
+    async function createGame() {
+        setUIState('searching');
         try {
-            // Start the search (Backend cleans up old games automatically)
             const response = await fetch('/api/matchmaking/find', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${userToken}` 
-                },
-                body: JSON.stringify({})
+                    'Authorization': `Bearer ${userToken}`
+                }
             });
 
-            if (!response.ok) throw new Error("Could not start matchmaking");
-            
-            // Start the loop
+            if (!response.ok) throw new Error("Search failed");
             startPolling();
         } catch (err) {
             console.error(err);
-            statusText.innerText = "Error starting matchmaking. Try again.";
-            btn.classList.remove('hidden');
-            loader.classList.add('hidden');
+            setUIState('idle', "Error starting search.");
         }
     }
 
-    // --- 2. ROBUST POLLING LOOP ---
+    // --- 2. JOIN GAME ---
+    async function joinGame(matchId) {
+        document.body.style.cursor = 'wait';
+        try {
+            const response = await fetch('/api/matchmaking/join', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${userToken}`
+                },
+                body: JSON.stringify({ match_id: matchId })
+            });
+
+            if (!response.ok) throw new Error(await response.text());
+
+            const ticket = await response.json();
+            await handleMatchFound(ticket);
+
+        } catch (err) {
+            alert("Join failed: " + err.message);
+        } finally {
+            document.body.style.cursor = 'default';
+        }
+    }
+
+    // --- 3. POLLING LOOP ---
     function startPolling() {
         if (isPolling) return;
         isPolling = true;
-        let idleRetries = 0; // FIX: Prevent race condition stopping the loop
+        let idleRetries = 0; 
 
         const poll = async () => {
             if (!isPolling) return;
@@ -134,31 +155,24 @@
                     const text = await response.text();
                     
                     if (text === "searching") {
-                        idleRetries = 0; // Reset retry count
-                        setTimeout(poll, 1500); 
-                    } 
-                    else if (text === "idle" || text === "finished") {
-                        // FIX: If we just started searching, the worker might not have 
-                        // created the DB row yet. We allow 5 "idle" responses before giving up.
+                        idleRetries = 0;
+                        setTimeout(poll, 1500);
+                    } else if (text === "idle" || text === "finished") {
+                        // Retry a few times to account for Worker lag
                         idleRetries++;
                         if (idleRetries < 5) {
-                            console.log("Got idle, retrying in case of worker lag...");
                             setTimeout(poll, 1000);
                         } else {
-                            // Truly idle
                             isPolling = false;
-                            document.getElementById('find-match-btn').classList.remove('hidden');
-                            document.getElementById('loader').classList.add('hidden');
-                            document.getElementById('status-text').innerText = "Ready to find a game?";
+                            setUIState('idle');
                         }
-                    } 
-                    else {
-                        // Match Found (JSON)
+                    } else {
+                        // Match Found
                         isPolling = false;
                         try {
                             const ticket = JSON.parse(text);
                             await handleMatchFound(ticket);
-                        } catch (e) { setTimeout(poll, 1500); }
+                        } catch(e) { setTimeout(poll, 1500); }
                     }
                 } else { setTimeout(poll, 3000); }
             } catch (err) { setTimeout(poll, 3000); }
@@ -166,39 +180,65 @@
         poll();
     }
 
-    // --- 3. LAUNCH GAME ---
+    // --- 4. LAUNCH GAME + WATCHDOG ---
     async function handleMatchFound(ticket) {
-        console.log("Match Found! Handoff Ticket:", ticket);
         document.getElementById('status-text').innerText = "Match Found! Connecting...";
-        
         document.getElementById('game-view').classList.remove('hidden');
         document.getElementById('overlay-status').innerText = "Connecting...";
 
         try {
             await init(); 
             
-            // This throws "control flow" exception on success
+            // --- NEW: THE WATCHDOG ---
+            // Polls the server every 2 seconds to see if the game died remotely.
+            const gameWatcher = setInterval(async () => {
+                try {
+                    const t = new Date().getTime();
+                    const res = await fetch(`/api/matchmaking/status?t=${t}`, {
+                         headers: { 'Authorization': `Bearer ${userToken}` }
+                    });
+                    if (res.ok) {
+                        const text = await res.text();
+                        // If DB says "finished" or "idle", the server process is gone.
+                        if (text === "finished" || text === "idle") {
+                            console.log("Watchdog: Game ended remotely.");
+                            clearInterval(gameWatcher);
+                            showGameOver(); 
+                        }
+                    }
+                } catch(e) {}
+            }, 2000);
+
+            // Launch Game (Blocks JS thread mostly, but setInterval still fires)
             await run_game("nineball-canvas", ticket.gateway_url, ticket.handoff_token);
             
-            // If it returns normally
+            // If we get here, the game exited cleanly
+            clearInterval(gameWatcher);
             showGameOver();
+
         } catch (e) {
             const errStr = String(e);
-            // FIX: Ignore the fake error thrown by winit
             if (errStr.includes("control flow")) {
-                console.log("Game started successfully.");
+                console.log("Game running...");
                 document.getElementById('overlay-status').innerText = "";
             } else {
-                console.error("WASM Crash:", e);
+                console.error(e);
                 alert("Game Engine Error: " + errStr);
                 handleReload();
             }
         }
     }
 
-    // --- 4. EXIT LOGIC ---
+    // --- 5. CLEANUP ---
     function showGameOver() {
         document.getElementById('game-over-modal').classList.remove('hidden');
+        // Try to release server immediately
+        try {
+            fetch('/api/matchmaking/leave', { 
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${userToken}` }
+            });
+        } catch(e) {}
     }
 
     async function handleReload() {
@@ -209,6 +249,18 @@
             });
         } catch(e) {}
         window.location.reload();
+    }
+
+    function setUIState(state, msg = "Initializing search...") {
+        const container = document.getElementById('status-container');
+        const txt = document.getElementById('status-text');
+        
+        if (state === 'searching') {
+            container.classList.remove('hidden');
+            txt.innerText = msg;
+        } else {
+            container.classList.add('hidden');
+        }
     }
 </script>
 {% endblock %}

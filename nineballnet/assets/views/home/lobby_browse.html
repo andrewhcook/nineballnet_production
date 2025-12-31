@@ -33,7 +33,7 @@
                         <th class="p-3 w-8"></th>
                         <th class="p-3 font-semibold">Player</th>
                         <th class="p-3 font-semibold">Rating</th>
-                        <th class="p-3 font-semibold">Race To</th>
+                        <th class="p-3 font-semibold">Variant</th>
                         <th class="p-3 font-semibold text-right">Mode</th>
                     </tr>
                 </thead>
@@ -109,6 +109,15 @@
     window.handleReload = handleReload;
     window.onGameFinished = showGameOver;
 
+    // --- NEW: CATCH TAB CLOSE ---
+    window.addEventListener('beforeunload', () => {
+        fetch('/api/matchmaking/leave', { 
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${userToken}` },
+            keepalive: true
+        });
+    });
+
     // --- 1. START SEARCH ---
     async function createGame() {
         setUIState('searching');
@@ -154,11 +163,11 @@
         }
     }
 
-    // --- 3. ROBUST POLLING LOOP ---
+    // --- 3. POLLING LOOP ---
     function startPolling() {
         if (isPolling) return;
         isPolling = true;
-        let idleRetries = 0; // FIX: Race condition protection
+        let idleRetries = 0; 
 
         const poll = async () => {
             if (!isPolling) return;
@@ -170,11 +179,12 @@
                 
                 if (response.ok) {
                     const text = await response.text();
+                    
                     if (text === "searching") {
                         idleRetries = 0;
                         setTimeout(poll, 1500);
                     } else if (text === "idle" || text === "finished") {
-                        // Allow 5 retries for slow backend workers
+                        // Retry a few times to account for Worker lag
                         idleRetries++;
                         if (idleRetries < 5) {
                             setTimeout(poll, 1000);
@@ -196,7 +206,7 @@
         poll();
     }
 
-    // --- 4. LAUNCH GAME ---
+    // --- 4. LAUNCH GAME + WATCHDOG ---
     async function handleMatchFound(ticket) {
         document.getElementById('status-text').innerText = "Match Found! Connecting...";
         document.getElementById('game-view').classList.remove('hidden');
@@ -204,11 +214,36 @@
 
         try {
             await init(); 
+            
+            // --- NEW: THE WATCHDOG ---
+            // Polls the server every 2 seconds to see if the game died remotely.
+            const gameWatcher = setInterval(async () => {
+                try {
+                    const t = new Date().getTime();
+                    const res = await fetch(`/api/matchmaking/status?t=${t}`, {
+                         headers: { 'Authorization': `Bearer ${userToken}` }
+                    });
+                    if (res.ok) {
+                        const text = await res.text();
+                        // If DB says "finished" or "idle", the server process is gone.
+                        if (text === "finished" || text === "idle") {
+                            console.log("Watchdog: Game ended remotely.");
+                            clearInterval(gameWatcher);
+                            showGameOver(); 
+                        }
+                    }
+                } catch(e) {}
+            }, 2000);
+
+            // Launch Game (Blocks JS thread mostly, but setInterval still fires)
             await run_game("nineball-canvas", ticket.gateway_url, ticket.handoff_token);
+            
+            // If we get here, the game exited cleanly
+            clearInterval(gameWatcher);
             showGameOver();
+
         } catch (e) {
             const errStr = String(e);
-            // FIX: Ignore Winit control flow exception
             if (errStr.includes("control flow")) {
                 console.log("Game running...");
                 document.getElementById('overlay-status').innerText = "";
@@ -223,6 +258,13 @@
     // --- 5. CLEANUP ---
     function showGameOver() {
         document.getElementById('game-over-modal').classList.remove('hidden');
+        // Try to release server immediately
+        try {
+            fetch('/api/matchmaking/leave', { 
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${userToken}` }
+            });
+        } catch(e) {}
     }
 
     async function handleReload() {
@@ -238,6 +280,7 @@
     function setUIState(state, msg = "Initializing search...") {
         const container = document.getElementById('status-container');
         const txt = document.getElementById('status-text');
+        
         if (state === 'searching') {
             container.classList.remove('hidden');
             txt.innerText = msg;
