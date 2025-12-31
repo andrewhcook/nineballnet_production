@@ -182,7 +182,7 @@
         poll();
     }
 
-    // --- 4. LAUNCH GAME + WATCHDOG ---
+    // --- UPDATED MATCH HANDLER ---
     async function handleMatchFound(ticket) {
         document.getElementById('status-text').innerText = "Match Found! Connecting...";
         document.getElementById('game-view').classList.remove('hidden');
@@ -191,7 +191,7 @@
         try {
             await init(); 
             
-            // WATCHDOG: Checks if server died while game is running
+            // WATCHDOG
             const gameWatcher = setInterval(async () => {
                 try {
                     const t = new Date().getTime();
@@ -200,10 +200,13 @@
                     });
                     if (res.ok) {
                         const text = await res.text();
+                        
+                        // If DB says "finished" or "idle", but the WASM is still running...
                         if (text === "finished" || text === "idle") {
                             console.log("Watchdog: Game ended remotely.");
                             clearInterval(gameWatcher);
-                            showGameOver(); 
+                            // PASS A SPECIFIC REASON HERE
+                            showGameOver("Opponent Disconnected"); 
                         }
                     }
                 } catch(e) {}
@@ -212,7 +215,8 @@
             await run_game("nineball-canvas", ticket.gateway_url, ticket.handoff_token);
             
             clearInterval(gameWatcher);
-            showGameOver();
+            // Normal Exit
+            showGameOver("Game Over");
 
         } catch (e) {
             const errStr = String(e);
@@ -227,37 +231,29 @@
         }
     }
 
-    // --- 5. CLEANUP ---
-    function showGameOver() {
-        document.getElementById('game-over-modal').classList.remove('hidden');
+    // --- UPDATED MODAL LOGIC ---
+    function showGameOver(reason = "Game Over") {
+        const modal = document.getElementById('game-over-modal');
+        const title = modal.querySelector('h2');
+        
+        // Update the text dynamically
+        title.innerText = reason;
+        
+        if (reason === "Opponent Disconnected") {
+            title.classList.add('text-red-500'); // Make it pop
+        } else {
+            title.classList.remove('text-red-500');
+        }
+
+        modal.classList.remove('hidden');
+
+        // Cleanup in background
         try {
             fetch('/api/matchmaking/leave', { 
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${userToken}` }
             });
         } catch(e) {}
-    }
-
-    async function handleReload() {
-        try {
-            await fetch('/api/matchmaking/leave', { 
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${userToken}` }
-            });
-        } catch(e) {}
-        window.location.reload();
-    }
-
-    function setUIState(state, msg = "Initializing search...") {
-        const container = document.getElementById('status-container');
-        const txt = document.getElementById('status-text');
-        
-        if (state === 'searching') {
-            container.classList.remove('hidden');
-            txt.innerText = msg;
-        } else {
-            container.classList.add('hidden');
-        }
     }
 </script>
 {% endblock %}

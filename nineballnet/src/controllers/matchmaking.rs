@@ -207,52 +207,62 @@ pub async fn leave(
         Error::BadRequest("Invalid player ID".to_string())
     })?;
 
-    let active_game = Matches::find()
+    // 1. Find ALL active games for this player
+    let games = Matches::find()
         .filter(matches::Column::PlayerId.eq(player_id))
-        .filter(
-            Condition::any()
-                .add(matches::Column::Status.eq("ready"))
-                .add(matches::Column::Status.eq("searching"))
-                .add(matches::Column::Status.eq("open"))
-        )
-        .one(&ctx.db)
+        .filter(matches::Column::Status.ne("finished"))
+        .filter(matches::Column::Status.ne("abandoned"))
+        .all(&ctx.db)
         .await
         .map_err(|e| Error::DB(e))?;
 
-    if let Some(game) = active_game {
-        // 1. Notify Allocator (Fire and Forget via Tokio Spawn)
+    if games.is_empty() {
+        return format::text("No active games");
+    }
+
+    let allocator_url = std::env::var("ALLOCATOR_URL")
+        .unwrap_or_else(|_| "http://localhost:10000".to_string());
+    
+    // Create the client once
+    let client = reqwest::Client::new();
+
+    for game in games {
+        // A. Notify Allocator
         if let Some(token) = game.handoff_token.clone() {
             let match_id = game.match_id.to_string();
-            let allocator_url = std::env::var("ALLOCATOR_URL")
-                .unwrap_or_else(|_| "http://localhost:10000".to_string());
+            let url = allocator_url.clone();
             
-            // Spawn a background task so we don't block the HTTP response
+            // FIX: Clone the client for THIS specific task
+            let client_clone = client.clone(); 
+
             tokio::spawn(async move {
-                let client = reqwest::Client::new();
-                let _ = client.post(format!("{}/deallocate", allocator_url))
-                    .json(&serde_json::json!({
-                        "match_id": match_id,
-                        "token": token
+                let _ = client_clone.post(format!("{}/deallocate", url))
+                    .json(&serde_json::json!({ 
+                        "match_id": match_id, 
+                        "token": token 
                     }))
                     .send()
                     .await;
             });
         }
 
-        // 2. Mark DB as Finished
-        let mut active: matches::ActiveModel = game.into();
-        active.status = Set("finished".to_string());
-        active.updated_at = Set(Utc::now().naive_utc());
-        active.save(&ctx.db).await.map_err(|e| Error::DB(e))?;
+        // B. Update DB: Mark EVERYONE in this match as finished
+        // This ensures the opponent's watchdog triggers "Opponent Disconnected"
+        matches::Entity::update_many()
+            .col_expr(matches::Column::Status, sea_orm::sea_query::Expr::value("finished"))
+            .filter(matches::Column::MatchId.eq(game.match_id))
+            .exec(&ctx.db)
+            .await
+            .map_err(|e| Error::DB(e))?;
     }
 
     format::text("Left game")
 }
-
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("api/matchmaking")
         .add("/find", post(find))
         .add("/status", get(status))
         .add("/join", post(join))
+        .add("/leave", post(leave))
 }
