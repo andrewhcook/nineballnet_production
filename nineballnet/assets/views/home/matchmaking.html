@@ -94,8 +94,7 @@
         statusText.innerText = "Searching for an available match server...";
 
         try {
-            // Tell Loco to start the matchmaking worker
-            // Note: The backend 'find' now aggressively cleans up old games
+            // Start the search (Backend cleans up old games automatically)
             const response = await fetch('/api/matchmaking/find', {
                 method: 'POST',
                 headers: {
@@ -107,6 +106,7 @@
 
             if (!response.ok) throw new Error("Could not start matchmaking");
             
+            // Start the loop
             startPolling();
         } catch (err) {
             console.error(err);
@@ -116,15 +116,15 @@
         }
     }
 
-    // --- 2. POLLING LOOP ---
+    // --- 2. ROBUST POLLING LOOP ---
     function startPolling() {
         if (isPolling) return;
         isPolling = true;
+        let idleRetries = 0; // FIX: Prevent race condition stopping the loop
 
         const poll = async () => {
             if (!isPolling) return;
             try {
-                // Cache busting timestamp
                 const t = new Date().getTime();
                 const response = await fetch(`/api/matchmaking/status?t=${t}`, {
                     headers: { 'Authorization': `Bearer ${userToken}` }
@@ -134,15 +134,26 @@
                     const text = await response.text();
                     
                     if (text === "searching") {
+                        idleRetries = 0; // Reset retry count
                         setTimeout(poll, 1500); 
-                    } else if (text === "idle" || text === "finished") {
-                        isPolling = false;
-                        // Reset UI if server cancelled search
-                        document.getElementById('find-match-btn').classList.remove('hidden');
-                        document.getElementById('loader').classList.add('hidden');
-                        document.getElementById('status-text').innerText = "Ready to find a game?";
-                    } else {
-                        // Match Found
+                    } 
+                    else if (text === "idle" || text === "finished") {
+                        // FIX: If we just started searching, the worker might not have 
+                        // created the DB row yet. We allow 5 "idle" responses before giving up.
+                        idleRetries++;
+                        if (idleRetries < 5) {
+                            console.log("Got idle, retrying in case of worker lag...");
+                            setTimeout(poll, 1000);
+                        } else {
+                            // Truly idle
+                            isPolling = false;
+                            document.getElementById('find-match-btn').classList.remove('hidden');
+                            document.getElementById('loader').classList.add('hidden');
+                            document.getElementById('status-text').innerText = "Ready to find a game?";
+                        }
+                    } 
+                    else {
+                        // Match Found (JSON)
                         isPolling = false;
                         try {
                             const ticket = JSON.parse(text);
@@ -155,32 +166,29 @@
         poll();
     }
 
-// --- 3. LAUNCH GAME ---
+    // --- 3. LAUNCH GAME ---
     async function handleMatchFound(ticket) {
         console.log("Match Found! Handoff Ticket:", ticket);
         document.getElementById('status-text').innerText = "Match Found! Connecting...";
         
-        // Switch Views
         document.getElementById('game-view').classList.remove('hidden');
         document.getElementById('overlay-status').innerText = "Connecting...";
 
         try {
             await init(); 
             
-            // This promise will reject with the "control flow" exception 
-            // the moment the game loop starts.
+            // This throws "control flow" exception on success
             await run_game("nineball-canvas", ticket.gateway_url, ticket.handoff_token);
             
+            // If it returns normally
+            showGameOver();
         } catch (e) {
             const errStr = String(e);
-            
-            // --- THE FIX ---
+            // FIX: Ignore the fake error thrown by winit
             if (errStr.includes("control flow")) {
-                // SUCCESS CASE: The game is running.
-                console.log("WASM loop running...");
+                console.log("Game started successfully.");
                 document.getElementById('overlay-status').innerText = "";
             } else {
-                // FAILURE CASE: Real crash
                 console.error("WASM Crash:", e);
                 alert("Game Engine Error: " + errStr);
                 handleReload();
@@ -194,15 +202,12 @@
     }
 
     async function handleReload() {
-        // Notify server we are done
         try {
             await fetch('/api/matchmaking/leave', { 
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${userToken}` }
             });
         } catch(e) {}
-        
-        // Force reload to clear Bevy memory state
         window.location.reload();
     }
 </script>

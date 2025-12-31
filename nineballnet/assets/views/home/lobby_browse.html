@@ -113,7 +113,6 @@
     async function createGame() {
         setUIState('searching');
         try {
-            // We assume the backend kills any old games automatically on /find
             const response = await fetch('/api/matchmaking/find', {
                 method: 'POST',
                 headers: {
@@ -155,15 +154,15 @@
         }
     }
 
-    // --- 3. POLLING LOOP ---
+    // --- 3. ROBUST POLLING LOOP ---
     function startPolling() {
         if (isPolling) return;
         isPolling = true;
+        let idleRetries = 0; // FIX: Race condition protection
 
         const poll = async () => {
             if (!isPolling) return;
             try {
-                // Add timestamp to kill cache
                 const t = new Date().getTime();
                 const response = await fetch(`/api/matchmaking/status?t=${t}`, {
                     headers: { 'Authorization': `Bearer ${userToken}` }
@@ -172,17 +171,24 @@
                 if (response.ok) {
                     const text = await response.text();
                     if (text === "searching") {
-                        setTimeout(poll, 1000); // Wait 1s
+                        idleRetries = 0;
+                        setTimeout(poll, 1500);
                     } else if (text === "idle" || text === "finished") {
-                        isPolling = false;
-                        setUIState('idle');
+                        // Allow 5 retries for slow backend workers
+                        idleRetries++;
+                        if (idleRetries < 5) {
+                            setTimeout(poll, 1000);
+                        } else {
+                            isPolling = false;
+                            setUIState('idle');
+                        }
                     } else {
                         // Match Found
                         isPolling = false;
                         try {
                             const ticket = JSON.parse(text);
                             await handleMatchFound(ticket);
-                        } catch(e) { setTimeout(poll, 1000); }
+                        } catch(e) { setTimeout(poll, 1500); }
                     }
                 } else { setTimeout(poll, 3000); }
             } catch (err) { setTimeout(poll, 3000); }
@@ -198,54 +204,40 @@
 
         try {
             await init(); 
-            
-            // Launch the game.
-            // NOTE: This usually throws "Using exceptions for control flow" immediately.
             await run_game("nineball-canvas", ticket.gateway_url, ticket.handoff_token);
-            
-            // If run_game() actually returns (rare), the game is done.
-            console.log("Game returned normally.");
-            // showGameOver(); // <--- OPTIONAL: Only if your engine returns cleanly.
-
+            showGameOver();
         } catch (e) {
             const errStr = String(e);
-            
-            // --- THE FIX ---
+            // FIX: Ignore Winit control flow exception
             if (errStr.includes("control flow")) {
-                // This is NOT an error. It means the game loop started successfully.
-                console.log("Game loop started. Hiding overlay status.");
-                document.getElementById('overlay-status').innerText = ""; 
-                // DO NOT call showGameOver() here!
+                console.log("Game running...");
+                document.getElementById('overlay-status').innerText = "";
             } else {
-                console.error("WASM Crash:", e);
+                console.error(e);
                 alert("Game Engine Error: " + errStr);
                 handleReload();
             }
         }
     }
 
-    // --- 5. CLEANUP & RELOAD ---
+    // --- 5. CLEANUP ---
     function showGameOver() {
         document.getElementById('game-over-modal').classList.remove('hidden');
     }
 
     async function handleReload() {
-        // Try to be nice and tell the server we left
         try {
             await fetch('/api/matchmaking/leave', { 
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${userToken}` }
             });
         } catch(e) {}
-        
-        // ALWAYS Reload the page to clear Bevy memory
         window.location.reload();
     }
 
     function setUIState(state, msg = "Initializing search...") {
         const container = document.getElementById('status-container');
         const txt = document.getElementById('status-text');
-        
         if (state === 'searching') {
             container.classList.remove('hidden');
             txt.innerText = msg;
