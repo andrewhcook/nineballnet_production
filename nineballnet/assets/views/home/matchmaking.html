@@ -78,12 +78,16 @@
     let isPolling = false;
 
     // --- GLOBAL EXPORTS ---
+    // We export BOTH names to be safe, so the button works regardless of 
+    // whether it says "onclick='createGame()'" or "onclick='handleFindMatch()'"
     window.createGame = createGame;
+    window.handleFindMatch = createGame; 
+    
     window.joinGame = joinGame;
     window.handleReload = handleReload;
     window.onGameFinished = showGameOver;
 
-    // --- NEW: CATCH TAB CLOSE ---
+    // --- CATCH TAB CLOSE ---
     window.addEventListener('beforeunload', () => {
         fetch('/api/matchmaking/leave', { 
             method: 'POST',
@@ -158,7 +162,6 @@
                         idleRetries = 0;
                         setTimeout(poll, 1500);
                     } else if (text === "idle" || text === "finished") {
-                        // Retry a few times to account for Worker lag
                         idleRetries++;
                         if (idleRetries < 5) {
                             setTimeout(poll, 1000);
@@ -167,7 +170,6 @@
                             setUIState('idle');
                         }
                     } else {
-                        // Match Found
                         isPolling = false;
                         try {
                             const ticket = JSON.parse(text);
@@ -189,8 +191,7 @@
         try {
             await init(); 
             
-            // --- NEW: THE WATCHDOG ---
-            // Polls the server every 2 seconds to see if the game died remotely.
+            // WATCHDOG: Checks if server died while game is running
             const gameWatcher = setInterval(async () => {
                 try {
                     const t = new Date().getTime();
@@ -199,7 +200,6 @@
                     });
                     if (res.ok) {
                         const text = await res.text();
-                        // If DB says "finished" or "idle", the server process is gone.
                         if (text === "finished" || text === "idle") {
                             console.log("Watchdog: Game ended remotely.");
                             clearInterval(gameWatcher);
@@ -209,10 +209,8 @@
                 } catch(e) {}
             }, 2000);
 
-            // Launch Game (Blocks JS thread mostly, but setInterval still fires)
             await run_game("nineball-canvas", ticket.gateway_url, ticket.handoff_token);
             
-            // If we get here, the game exited cleanly
             clearInterval(gameWatcher);
             showGameOver();
 
@@ -232,7 +230,6 @@
     // --- 5. CLEANUP ---
     function showGameOver() {
         document.getElementById('game-over-modal').classList.remove('hidden');
-        // Try to release server immediately
         try {
             fetch('/api/matchmaking/leave', { 
                 method: 'POST',
