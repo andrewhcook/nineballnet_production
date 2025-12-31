@@ -198,17 +198,26 @@
 
         try {
             await init(); 
-            // Wait for game to exit
+            
+            // Launch the game.
+            // NOTE: This usually throws "Using exceptions for control flow" immediately.
             await run_game("nineball-canvas", ticket.gateway_url, ticket.handoff_token);
-            // If we get here, game exited normally
-            showGameOver();
+            
+            // If run_game() actually returns (rare), the game is done.
+            console.log("Game returned normally.");
+            // showGameOver(); // <--- OPTIONAL: Only if your engine returns cleanly.
+
         } catch (e) {
             const errStr = String(e);
+            
+            // --- THE FIX ---
             if (errStr.includes("control flow")) {
-                // Normal exit via Wasm panic/unwind
-                showGameOver();
+                // This is NOT an error. It means the game loop started successfully.
+                console.log("Game loop started. Hiding overlay status.");
+                document.getElementById('overlay-status').innerText = ""; 
+                // DO NOT call showGameOver() here!
             } else {
-                console.error(e);
+                console.error("WASM Crash:", e);
                 alert("Game Engine Error: " + errStr);
                 handleReload();
             }

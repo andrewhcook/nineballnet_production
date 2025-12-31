@@ -9,14 +9,12 @@
             <h2 class="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-3 border-b border-gray-200 dark:border-gray-600 pb-2">
                 Game Guide
             </h2>
-
             <p class="text-sm text-gray-600 dark:text-gray-300 mb-4">
                 This game follows the standard 
                 <a href="https://en.wikipedia.org/wiki/Nine-ball" target="_blank" rel="noopener noreferrer" class="text-blue-600 dark:text-blue-400 hover:underline font-medium">
                     Nine-ball Ruleset (Wikipedia)
                 </a>.
             </p>
-
             <div class="mb-4">
                 <h3 class="text-sm font-bold text-gray-700 dark:text-gray-200 mb-2 uppercase tracking-wide">Controls</h3>
                 <ul class="text-sm space-y-2 text-gray-600 dark:text-gray-300">
@@ -34,17 +32,17 @@
                     </li>
                 </ul>
             </div>
-
             <div class="text-xs bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-200 p-3 rounded leading-relaxed">
-                <strong>Placement Tip:</strong> When aiming a shot (MOUSE), the direction is set by the position of the cue ball relative to your cursor. The cue ball will move towards the point of the cursor.
+                <strong>Aiming Tip:</strong> The cue ball will move towards the point of the cursor.
             </div>
         </div>
+
         <div id="status-container" class="mb-8">
             <p id="status-text" class="text-gray-600 dark:text-gray-400 text-lg">
                 Ready to find a game?
             </p>
-            <div id="loader" class="hidden mt-4 justify-center">
-                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+            <div id="loader" class="hidden mt-4 flex justify-center">
+                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
             </div>
         </div>
 
@@ -56,9 +54,19 @@
     </div>
 
     <div id="game-view" class="hidden fixed inset-0 bg-black z-50 flex items-center justify-center">
-        <canvas id="nineball-canvas" class="max-w-full max-h-full shadow-2xl"></canvas>
+        <canvas id="nineball-canvas" class="max-w-full max-h-full shadow-2xl focus:outline-none" tabindex="0"></canvas>
+        
         <div id="overlay-status" class="absolute top-4 left-4 text-white bg-black bg-opacity-50 px-3 py-1 rounded text-sm font-mono">
             Initializing Wasm Engine...
+        </div>
+
+        <div id="game-over-modal" class="hidden absolute inset-0 bg-black bg-opacity-90 flex flex-col items-center justify-center z-50">
+            <h2 class="text-4xl font-bold text-white mb-4">Game Over</h2>
+            <div class="flex space-x-4">
+                <button onclick="handleReload()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-8 rounded-lg border border-blue-500">
+                    Return to Lobby
+                </button>
+            </div>
         </div>
     </div>
 </div>
@@ -69,43 +77,12 @@
 
     let isPolling = false;
 
-    // --- NEW: AUTO-RECONNECT ON LOAD ---
-    document.addEventListener('DOMContentLoaded', async () => {
-        console.log("Checking for existing session...");
-        
-        try {
-            const timestamp = new Date().getTime();
-            const response = await fetch(`/api/matchmaking/status?t=${timestamp}`);
-            
-            if (response.ok) {
-                const text = await response.text();
-                
-                if (text === "idle") {
-                    console.log("User is idle.");
-                    // Do nothing, show the "Find Match" button normally
-                } 
-                else if (text === "searching") {
-                    console.log("User was searching. Resuming poll...");
-                    // Restore "Searching" UI state
-                    document.getElementById('find-match-btn').classList.add('hidden');
-                    document.getElementById('loader').classList.remove('hidden');
-                    document.getElementById('status-text').innerText = "Resuming search...";
-                    
-                    // Restart the loop
-                    startPolling();
-                } 
-                else {
-                    // It's JSON! The user was already in a READY game.
-                    console.log("Reconnecting to active match!");
-                    const ticket = JSON.parse(text);
-                    await handleMatchFound(ticket);
-                }
-            }
-        } catch (err) {
-            console.error("Auto-connect failed:", err);
-        }
-    });
+    // --- GLOBAL EXPORTS ---
+    window.handleFindMatch = handleFindMatch;
+    window.handleReload = handleReload;
+    window.onGameFinished = showGameOver;
 
+    // --- 1. START SEARCH ---
     async function handleFindMatch() {
         const btn = document.getElementById('find-match-btn');
         const statusText = document.getElementById('status-text');
@@ -117,19 +94,19 @@
         statusText.innerText = "Searching for an available match server...";
 
         try {
-            // 1. Tell Loco to start the matchmaking worker
+            // Tell Loco to start the matchmaking worker
+            // Note: The backend 'find' now aggressively cleans up old games
             const response = await fetch('/api/matchmaking/find', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${userToken}` // Make sure userToken is defined
+                    'Authorization': `Bearer ${userToken}` 
                 },
-                body: JSON.stringify({ /* your search params */ })
+                body: JSON.stringify({})
             });
 
             if (!response.ok) throw new Error("Could not start matchmaking");
-
-            // 2. Begin polling the status endpoint
+            
             startPolling();
         } catch (err) {
             console.error(err);
@@ -139,63 +116,94 @@
         }
     }
 
+    // --- 2. POLLING LOOP ---
     function startPolling() {
         if (isPolling) return;
         isPolling = true;
 
         const poll = async () => {
+            if (!isPolling) return;
             try {
-                const response = await fetch('/api/matchmaking/status');
+                // Cache busting timestamp
+                const t = new Date().getTime();
+                const response = await fetch(`/api/matchmaking/status?t=${t}`, {
+                    headers: { 'Authorization': `Bearer ${userToken}` }
+                });
                 
-                // If it's a 200 and has content
                 if (response.ok) {
                     const text = await response.text();
                     
-                    // The backend returns the string "searching" if not ready
                     if (text === "searching") {
-                        setTimeout(poll, 1500); // Check again in 1.5s
+                        setTimeout(poll, 1500); 
+                    } else if (text === "idle" || text === "finished") {
+                        isPolling = false;
+                        // Reset UI if server cancelled search
+                        document.getElementById('find-match-btn').classList.remove('hidden');
+                        document.getElementById('loader').classList.add('hidden');
+                        document.getElementById('status-text').innerText = "Ready to find a game?";
                     } else {
-                        // It's JSON! The match is found.
-                        const ticket = JSON.parse(text);
-                        handleMatchFound(ticket);
+                        // Match Found
+                        isPolling = false;
+                        try {
+                            const ticket = JSON.parse(text);
+                            await handleMatchFound(ticket);
+                        } catch (e) { setTimeout(poll, 1500); }
                     }
-                }
-            } catch (err) {
-                console.warn("Polling error, retrying...", err);
-                setTimeout(poll, 3000);
-            }
+                } else { setTimeout(poll, 3000); }
+            } catch (err) { setTimeout(poll, 3000); }
         };
-
         poll();
     }
 
+// --- 3. LAUNCH GAME ---
     async function handleMatchFound(ticket) {
         console.log("Match Found! Handoff Ticket:", ticket);
+        document.getElementById('status-text').innerText = "Match Found! Connecting...";
         
-        const overlay = document.getElementById('overlay-status');
-        const gameView = document.getElementById('game-view');
+        // Switch Views
+        document.getElementById('game-view').classList.remove('hidden');
+        document.getElementById('overlay-status').innerText = "Connecting...";
 
-        // Show the game container
-        gameView.classList.remove('hidden');
-        
         try {
-            // 3. Initialize Wasm
-            overlay.innerText = "Connecting to Game Server...";
             await init(); 
-
-            overlay.innerText = ""; // Hide status once game takes over
             
-            // 4. Hand off to the Wasm engine
-            // Parameters: canvas_id, gateway_url, handoff_token
-            run_game("nineball-canvas", ticket.gateway_url, ticket.handoff_token);
-
-        } catch (err) {
-            console.error("Wasm failure:", err);
-           
+            // This promise will reject with the "control flow" exception 
+            // the moment the game loop starts.
+            await run_game("nineball-canvas", ticket.gateway_url, ticket.handoff_token);
+            
+        } catch (e) {
+            const errStr = String(e);
+            
+            // --- THE FIX ---
+            if (errStr.includes("control flow")) {
+                // SUCCESS CASE: The game is running.
+                console.log("WASM loop running...");
+                document.getElementById('overlay-status').innerText = "";
+            } else {
+                // FAILURE CASE: Real crash
+                console.error("WASM Crash:", e);
+                alert("Game Engine Error: " + errStr);
+                handleReload();
+            }
         }
     }
 
-    // Attach to window for the onclick handler
-    window.handleFindMatch = handleFindMatch;
+    // --- 4. EXIT LOGIC ---
+    function showGameOver() {
+        document.getElementById('game-over-modal').classList.remove('hidden');
+    }
+
+    async function handleReload() {
+        // Notify server we are done
+        try {
+            await fetch('/api/matchmaking/leave', { 
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${userToken}` }
+            });
+        } catch(e) {}
+        
+        // Force reload to clear Bevy memory state
+        window.location.reload();
+    }
 </script>
 {% endblock %}
