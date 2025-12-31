@@ -207,7 +207,7 @@ pub async fn leave(
         Error::BadRequest("Invalid player ID".to_string())
     })?;
 
-    // 1. Find ALL active games for this player
+    // 1. Find active games for this player
     let games = Matches::find()
         .filter(matches::Column::PlayerId.eq(player_id))
         .filter(matches::Column::Status.ne("finished"))
@@ -223,41 +223,53 @@ pub async fn leave(
     let allocator_url = std::env::var("ALLOCATOR_URL")
         .unwrap_or_else(|_| "http://localhost:10000".to_string());
     
-    // Create the client once
     let client = reqwest::Client::new();
 
     for game in games {
-        // A. Notify Allocator
-        if let Some(token) = game.handoff_token.clone() {
-            let match_id = game.match_id.to_string();
-            let url = allocator_url.clone();
-            
-            // FIX: Clone the client for THIS specific task
-            let client_clone = client.clone(); 
+        // --- SCENARIO A: GAME WAS ACTIVE (Rage Quit) ---
+        if game.status == "ready" {
+            // 1. Notify Allocator to kill process
+            if let Some(token) = game.handoff_token.clone() {
+                let match_id = game.match_id.to_string();
+                let url = allocator_url.clone();
+                let client_clone = client.clone();
 
-            tokio::spawn(async move {
-                let _ = client_clone.post(format!("{}/deallocate", url))
-                    .json(&serde_json::json!({ 
-                        "match_id": match_id, 
-                        "token": token 
-                    }))
-                    .send()
-                    .await;
-            });
+                tokio::spawn(async move {
+                    let _ = client_clone.post(format!("{}/deallocate", url))
+                        .json(&serde_json::json!({ 
+                            "match_id": match_id, 
+                            "token": token 
+                        }))
+                        .send()
+                        .await;
+                });
+            }
+
+            // 2. Mark EVERYONE in the match as 'finished'
+            // This triggers the "Opponent Disconnected" watchdog for the other player
+            matches::Entity::update_many()
+                .col_expr(matches::Column::Status, sea_orm::sea_query::Expr::value("finished"))
+                .filter(matches::Column::MatchId.eq(game.match_id))
+                .exec(&ctx.db)
+                .await
+                .map_err(|e| Error::DB(e))?;
+        } 
+        
+        // --- SCENARIO B: CANCELLING SEARCH (Lobby/Queue) ---
+        else {
+            // The game never started. Just remove it from the Lobby/Queue.
+            // We mark it 'abandoned' so it stops showing up in the "Browse" list.
+            let mut active: matches::ActiveModel = game.into();
+            active.status = Set("abandoned".to_string());
+            active.updated_at = Set(Utc::now().naive_utc());
+            active.save(&ctx.db).await.map_err(|e| Error::DB(e))?;
         }
-
-        // B. Update DB: Mark EVERYONE in this match as finished
-        // This ensures the opponent's watchdog triggers "Opponent Disconnected"
-        matches::Entity::update_many()
-            .col_expr(matches::Column::Status, sea_orm::sea_query::Expr::value("finished"))
-            .filter(matches::Column::MatchId.eq(game.match_id))
-            .exec(&ctx.db)
-            .await
-            .map_err(|e| Error::DB(e))?;
     }
 
-    format::text("Left game")
+    format::text("Left game/queue")
 }
+
+
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("api/matchmaking")

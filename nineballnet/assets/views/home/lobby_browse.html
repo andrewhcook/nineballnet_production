@@ -272,16 +272,20 @@
         poll();
     }
 
-    async function handleMatchFound(ticket) {
+   async function handleMatchFound(ticket) {
         const statusText = document.getElementById('status-text');
         if (statusText) statusText.innerText = "Match Found! Connecting...";
         
         document.getElementById('game-view').classList.remove('hidden');
         document.getElementById('overlay-status').innerText = "Connecting...";
 
+        // FLAG: Tracks if the game successfully entered the loop
+        let gameHasLaunched = false;
+
         try {
             await init(); 
             
+            // Watchdog (unchanged)
             const gameWatcher = setInterval(async () => {
                 try {
                     const t = new Date().getTime();
@@ -299,20 +303,40 @@
                 } catch(e) {}
             }, 2000);
 
+            // --- RUN GAME ---
+            // This promise rejects immediately with "control flow" when the game starts
+            // OR it rejects with "unreachable" when the game ends via AppExit.
             await run_game("nineball-canvas", ticket.gateway_url, ticket.handoff_token);
             
+            // If we get here, it was a super clean exit (rare)
             clearInterval(gameWatcher);
             showGameOver("Game Over");
 
         } catch (e) {
             const errStr = String(e);
+
+            // CASE 1: Game Loop Starting (Not an error)
             if (errStr.includes("control flow")) {
-                console.log("Game running...");
+                console.log("Game loop running...");
+                gameHasLaunched = true; // <--- Mark success
                 document.getElementById('overlay-status').innerText = "";
-            } else {
-                console.error(e);
-                alert("Game Engine Error: " + errStr);
-                handleReload();
+            } 
+            // CASE 2: Game Exiting via AppExit (The "Unreachable" Error)
+            else if (gameHasLaunched && (errStr.includes("unreachable") || errStr.includes("recursive use of an object"))) {
+                console.log("Game exited normally via WASM panic.");
+                showGameOver("Game Over");
+            }
+            // CASE 3: Actual Crash (Startup failure or unexpected error)
+            else {
+                console.error("WASM Crash:", e);
+                // Only alert if it failed to even start
+                if (!gameHasLaunched) {
+                    alert("Game Engine Error: " + errStr);
+                    handleReload();
+                } else {
+                    // If it crashed mid-game, just show Game Over (graceful degradation)
+                    showGameOver("Game Over");
+                }
             }
         }
     }
