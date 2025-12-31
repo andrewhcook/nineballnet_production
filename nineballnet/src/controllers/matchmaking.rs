@@ -35,20 +35,32 @@ struct AllocatorResponse {
 
 // --- HANDLERS ---
 
-// POST /api/matchmaking/find (Unchanged)
+// POST /api/matchmaking/find
 pub async fn find(
     auth: auth::JWT,
     State(ctx): State<AppContext>,
 ) -> Result<Response> {
     let player_id = Uuid::parse_str(&auth.claims.pid).map_err(|_| {
-        Error::BadRequest("Invalid player ID format in token".to_string())
+        Error::BadRequest("Invalid player ID".to_string())
     })?;
 
-    matches::Entity::delete_many()
+    // 1. FORCE CLEANUP: Mark ANY active/zombie games as 'abandoned'
+    // This acts as a self-healing mechanism. If they were stuck in a loop,
+    // clicking "Find Match" breaks the loop.
+    matches::Entity::update_many()
+        .col_expr(matches::Column::Status, sea_orm::sea_query::Expr::value("abandoned"))
         .filter(matches::Column::PlayerId.eq(player_id))
+        .filter(
+            Condition::any()
+                .add(matches::Column::Status.eq("ready"))
+                .add(matches::Column::Status.eq("searching"))
+                .add(matches::Column::Status.eq("open"))
+        )
         .exec(&ctx.db)
-        .await?;
+        .await
+        .map_err(|e| Error::DB(e))?;
 
+    // 2. Start the New Search
     MatchmakingWorker::perform_later(
         &ctx, 
         MatchmakingWorkerArgs { player_id }
