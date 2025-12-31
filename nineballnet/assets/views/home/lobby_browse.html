@@ -49,7 +49,6 @@
                         {% for game in games %}
                         <tr onclick="joinGame('{{ game.id }}')" 
                             class="group border-b border-gray-100 dark:border-gray-700 hover:bg-blue-50 dark:hover:bg-blue-900/20 cursor-pointer transition-colors">
-                            
                             <td class="p-3 text-center">
                                 <span class="inline-block w-3 h-3 rounded-full 
                                     {% if game.status == 'open' %}bg-green-500{% else %}bg-gray-400{% endif %}" 
@@ -60,7 +59,7 @@
                                 {{ game.host_name }}
                             </td>
                             <td class="p-3 text-gray-600 dark:text-gray-300">
-                                {{ game.host_rating }} {% if game.rating_provisional %}?{% endif %}
+                                {{ game.host_rating }}
                             </td>
                             <td class="p-3 text-gray-600 dark:text-gray-300">
                                 {{ game.config_description }}
@@ -90,11 +89,8 @@
         <div id="game-over-modal" class="hidden absolute inset-0 bg-black bg-opacity-90 flex flex-col items-center justify-center z-50">
             <h2 class="text-4xl font-bold text-white mb-4">Game Over</h2>
             <div class="flex space-x-4">
-                <button onclick="handlePlayAgain()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-8 rounded-lg border border-blue-500">
-                    Play Again
-                </button>
-                <button onclick="handleReturnToLobby()" class="bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 px-8 rounded-lg border border-gray-600">
-                    Lobby
+                <button onclick="handleReload()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-8 rounded-lg border border-blue-500">
+                    Return to Lobby
                 </button>
             </div>
         </div>
@@ -107,40 +103,17 @@
 
     let isPolling = false;
 
-    // --- 1. GLOBAL EXPORTS ---
+    // --- GLOBAL EXPORTS ---
     window.createGame = createGame;
     window.joinGame = joinGame;
-    window.handlePlayAgain = handlePlayAgain;
-    window.handleReturnToLobby = handleReturnToLobby;
+    window.handleReload = handleReload;
     window.onGameFinished = showGameOver;
 
-    // --- 2. AUTO-RECONNECT ON LOAD ---
-    document.addEventListener('DOMContentLoaded', async () => {
-        try {
-            const t = new Date().getTime();
-            const response = await fetch(`/api/matchmaking/status?t=${t}`, {
-                headers: { 'Authorization': `Bearer ${userToken}` }
-            });
-            
-            if (response.ok) {
-                const text = await response.text();
-                if (text === "searching") {
-                    console.log("Resuming search...");
-                    setUIState('searching');
-                    startPolling();
-                } else if (text !== "idle" && text !== "finished") {
-                    console.log("Reconnecting to match...");
-                    const ticket = JSON.parse(text);
-                    await handleMatchFound(ticket);
-                }
-            }
-        } catch (err) { console.error("Auto-connect failed:", err); }
-    });
-
-    // --- 3. CREATE GAME (Random Match) ---
+    // --- 1. START SEARCH ---
     async function createGame() {
         setUIState('searching');
         try {
+            // We assume the backend kills any old games automatically on /find
             const response = await fetch('/api/matchmaking/find', {
                 method: 'POST',
                 headers: {
@@ -157,25 +130,20 @@
         }
     }
 
-    // --- 4. JOIN GAME (Specific) ---
+    // --- 2. JOIN GAME ---
     async function joinGame(matchId) {
-        console.log("Joining:", matchId);
         document.body.style.cursor = 'wait';
-
         try {
             const response = await fetch('/api/matchmaking/join', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${userToken}` // Auth Header for Join
+                    'Authorization': `Bearer ${userToken}`
                 },
                 body: JSON.stringify({ match_id: matchId })
             });
 
-            if (!response.ok) {
-                const txt = await response.text();
-                throw new Error(txt);
-            }
+            if (!response.ok) throw new Error(await response.text());
 
             const ticket = await response.json();
             await handleMatchFound(ticket);
@@ -187,7 +155,7 @@
         }
     }
 
-    // --- 5. POLLING LOOP ---
+    // --- 3. POLLING LOOP ---
     function startPolling() {
         if (isPolling) return;
         isPolling = true;
@@ -195,6 +163,7 @@
         const poll = async () => {
             if (!isPolling) return;
             try {
+                // Add timestamp to kill cache
                 const t = new Date().getTime();
                 const response = await fetch(`/api/matchmaking/status?t=${t}`, {
                     headers: { 'Authorization': `Bearer ${userToken}` }
@@ -203,16 +172,17 @@
                 if (response.ok) {
                     const text = await response.text();
                     if (text === "searching") {
-                        setTimeout(poll, 1500);
+                        setTimeout(poll, 1000); // Wait 1s
                     } else if (text === "idle" || text === "finished") {
                         isPolling = false;
                         setUIState('idle');
                     } else {
+                        // Match Found
                         isPolling = false;
                         try {
                             const ticket = JSON.parse(text);
                             await handleMatchFound(ticket);
-                        } catch(e) { setTimeout(poll, 1500); }
+                        } catch(e) { setTimeout(poll, 1000); }
                     }
                 } else { setTimeout(poll, 3000); }
             } catch (err) { setTimeout(poll, 3000); }
@@ -220,94 +190,47 @@
         poll();
     }
 
-    // 6. GAME LAUNCH
+    // --- 4. LAUNCH GAME ---
     async function handleMatchFound(ticket) {
         document.getElementById('status-text').innerText = "Match Found! Connecting...";
-        
-        const gameView = document.getElementById('game-view');
-        gameView.classList.remove('hidden');
+        document.getElementById('game-view').classList.remove('hidden');
         document.getElementById('overlay-status').innerText = "Connecting...";
 
         try {
             await init(); 
-            
-            // This promise rejects when the game exits via "control flow exception"
+            // Wait for game to exit
             await run_game("nineball-canvas", ticket.gateway_url, ticket.handoff_token);
-            
-            // If it returns normally (rare in some loops), show game over
+            // If we get here, game exited normally
             showGameOver();
-
         } catch (e) {
-            // --- FIX START ---
-            const errorString = String(e);
-
-            // Check if this is the "fake" error used for exiting the game loop
-            if (errorString.includes("Using exceptions for control flow")) {
-                console.log("Game exited cleanly via WASM unwind.");
-                showGameOver(); // Treat this as a valid Game Over
+            const errStr = String(e);
+            if (errStr.includes("control flow")) {
+                // Normal exit via Wasm panic/unwind
+                showGameOver();
             } else {
-                // This is a REAL crash (e.g., panic, memory error)
-                console.error("Critical WASM Error:", e);
-                alert("Game Engine Crashed: " + errorString);
-                handleReturnToLobby();
+                console.error(e);
+                alert("Game Engine Error: " + errStr);
+                handleReload();
             }
-            // --- FIX END ---
         }
     }
 
-    // --- 7. GAME OVER LOGIC ---
+    // --- 5. CLEANUP & RELOAD ---
     function showGameOver() {
         document.getElementById('game-over-modal').classList.remove('hidden');
     }
 
-    async function handlePlayAgain() {
-        document.getElementById('game-over-modal').classList.add('hidden');
-        document.getElementById('game-view').classList.add('hidden');
-        // Implicitly archives old game via backend logic
-        await createGame(); 
-    }
-
-    async function handleReturnToLobby() {
-        console.log("Returning to lobby...");
-        
-        // 1. UI Feedback
-        document.body.style.cursor = 'wait';
-        const modalBtn = document.querySelector('#game-over-modal button:last-child');
-        if(modalBtn) modalBtn.innerText = "Leaving...";
-
+    async function handleReload() {
+        // Try to be nice and tell the server we left
         try {
-            // 2. Call Leave Endpoint
-            const response = await fetch('/api/matchmaking/leave', { 
+            await fetch('/api/matchmaking/leave', { 
                 method: 'POST',
-                headers: { 
-                    'Authorization': `Bearer ${userToken}`,
-                    'Content-Type': 'application/json' // Good practice
-                }
+                headers: { 'Authorization': `Bearer ${userToken}` }
             });
-
-            if (!response.ok) {
-                const errText = await response.text();
-                console.error("Leave failed:", errText);
-                alert("Server Error: " + errText);
-                // Do NOT reload if the server failed, or we loop.
-                document.body.style.cursor = 'default';
-                if(modalBtn) modalBtn.innerText = "Back to Lobby";
-                return; 
-            }
-
-            // 3. Success - NOW we reload
-            console.log("Leave successful. Reloading...");
-            
-            // Optional: Set a flag so next load knows we just quit
-            sessionStorage.setItem("just_left_game", "true");
-            
-            window.location.reload();
-
-        } catch(e) { 
-            console.error("Network error during leave:", e);
-            alert("Network connection lost. Could not notify server.");
-            document.body.style.cursor = 'default';
-        }
+        } catch(e) {}
+        
+        // ALWAYS Reload the page to clear Bevy memory
+        window.location.reload();
     }
 
     function setUIState(state, msg = "Initializing search...") {
