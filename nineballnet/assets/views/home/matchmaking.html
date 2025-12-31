@@ -77,26 +77,67 @@
 
     let isPolling = false;
 
-    // --- GLOBAL EXPORTS ---
-    // We export BOTH names to be safe, so the button works regardless of 
-    // whether it says "onclick='createGame()'" or "onclick='handleFindMatch()'"
-    window.createGame = createGame;
-    window.handleFindMatch = createGame; 
-    
-    window.joinGame = joinGame;
-    window.handleReload = handleReload;
-    window.onGameFinished = showGameOver;
+    // ==========================================
+    // 1. HELPER FUNCTIONS (Defined Top to avoid Errors)
+    // ==========================================
 
-    // --- CATCH TAB CLOSE ---
-    window.addEventListener('beforeunload', () => {
-        fetch('/api/matchmaking/leave', { 
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${userToken}` },
-            keepalive: true
-        });
-    });
+    function setUIState(state, msg = "Initializing search...") {
+        const container = document.getElementById('status-container');
+        const txt = document.getElementById('status-text');
+        
+        if (!container || !txt) return; // Safety check
 
-    // --- 1. START SEARCH ---
+        if (state === 'searching') {
+            container.classList.remove('hidden');
+            txt.innerText = msg;
+        } else {
+            container.classList.add('hidden');
+        }
+    }
+
+    async function handleReload() {
+        // Notify server we are leaving
+        try {
+            await fetch('/api/matchmaking/leave', { 
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${userToken}` }
+            });
+        } catch(e) { console.warn("Leave failed", e); }
+        
+        // Always force reload to clear WASM memory
+        window.location.reload();
+    }
+
+    function showGameOver(reason = "Game Over") {
+        const modal = document.getElementById('game-over-modal');
+        if (!modal) return;
+
+        // Update Text
+        const title = modal.querySelector('h2');
+        if (title) {
+            title.innerText = reason;
+            if (reason === "Opponent Disconnected") {
+                title.classList.add('text-red-500');
+            } else {
+                title.classList.remove('text-red-500');
+            }
+        }
+
+        modal.classList.remove('hidden');
+
+        // Cleanup Server in background
+        try {
+            fetch('/api/matchmaking/leave', { 
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${userToken}` }
+            });
+        } catch(e) {}
+    }
+
+    // ==========================================
+    // 2. MAIN LOGIC
+    // ==========================================
+
     async function createGame() {
         setUIState('searching');
         try {
@@ -116,7 +157,6 @@
         }
     }
 
-    // --- 2. JOIN GAME ---
     async function joinGame(matchId) {
         document.body.style.cursor = 'wait';
         try {
@@ -141,7 +181,6 @@
         }
     }
 
-    // --- 3. POLLING LOOP ---
     function startPolling() {
         if (isPolling) return;
         isPolling = true;
@@ -170,6 +209,7 @@
                             setUIState('idle');
                         }
                     } else {
+                        // Match Found
                         isPolling = false;
                         try {
                             const ticket = JSON.parse(text);
@@ -182,16 +222,17 @@
         poll();
     }
 
-    // --- UPDATED MATCH HANDLER ---
     async function handleMatchFound(ticket) {
-        document.getElementById('status-text').innerText = "Match Found! Connecting...";
+        const statusText = document.getElementById('status-text');
+        if (statusText) statusText.innerText = "Match Found! Connecting...";
+        
         document.getElementById('game-view').classList.remove('hidden');
         document.getElementById('overlay-status').innerText = "Connecting...";
 
         try {
             await init(); 
             
-            // WATCHDOG
+            // WATCHDOG: Detects if server dies/opponent leaves
             const gameWatcher = setInterval(async () => {
                 try {
                     const t = new Date().getTime();
@@ -200,22 +241,19 @@
                     });
                     if (res.ok) {
                         const text = await res.text();
-                        
-                        // If DB says "finished" or "idle", but the WASM is still running...
                         if (text === "finished" || text === "idle") {
                             console.log("Watchdog: Game ended remotely.");
                             clearInterval(gameWatcher);
-                            // PASS A SPECIFIC REASON HERE
                             showGameOver("Opponent Disconnected"); 
                         }
                     }
                 } catch(e) {}
             }, 2000);
 
+            // Launch Game
             await run_game("nineball-canvas", ticket.gateway_url, ticket.handoff_token);
             
             clearInterval(gameWatcher);
-            // Normal Exit
             showGameOver("Game Over");
 
         } catch (e) {
@@ -231,29 +269,22 @@
         }
     }
 
-    // --- UPDATED MODAL LOGIC ---
-    function showGameOver(reason = "Game Over") {
-        const modal = document.getElementById('game-over-modal');
-        const title = modal.querySelector('h2');
-        
-        // Update the text dynamically
-        title.innerText = reason;
-        
-        if (reason === "Opponent Disconnected") {
-            title.classList.add('text-red-500'); // Make it pop
-        } else {
-            title.classList.remove('text-red-500');
-        }
+    // ==========================================
+    // 3. EXPORTS & LISTENERS
+    // ==========================================
 
-        modal.classList.remove('hidden');
+    window.createGame = createGame;
+    window.handleFindMatch = createGame; // Alias for the button
+    window.joinGame = joinGame;
+    window.handleReload = handleReload;
+    window.onGameFinished = () => showGameOver("Game Over");
 
-        // Cleanup in background
-        try {
-            fetch('/api/matchmaking/leave', { 
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${userToken}` }
-            });
-        } catch(e) {}
-    }
+    window.addEventListener('beforeunload', () => {
+        fetch('/api/matchmaking/leave', { 
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${userToken}` },
+            keepalive: true
+        });
+    });
 </script>
 {% endblock %}
