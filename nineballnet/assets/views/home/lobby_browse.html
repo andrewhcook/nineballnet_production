@@ -18,13 +18,19 @@
         </div>
 
         <div id="status-container" class="hidden bg-blue-50 dark:bg-blue-900/20 p-4 border-b border-blue-100 dark:border-blue-800 transition-all">
-            <div class="flex items-center justify-center space-x-3">
-                <div id="loader" class="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
-                <p id="status-text" class="text-sm text-blue-800 dark:text-blue-200 font-medium">
-                    Initializing search...
-                </p>
-            </div>
-        </div>
+    <div class="flex items-center justify-center space-x-4">
+        <div id="loader" class="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+        
+        <p id="status-text" class="text-sm text-blue-800 dark:text-blue-200 font-medium">
+            Initializing search...
+        </p>
+
+        <button onclick="cancelSearch()" 
+                class="px-3 py-1 text-xs font-bold text-red-600 border border-red-200 bg-white rounded hover:bg-red-50 hover:border-red-400 transition-colors">
+            CANCEL
+        </button>
+    </div>
+</div>
 
         <div class="overflow-x-auto">
             <table class="w-full text-left border-collapse">
@@ -104,14 +110,14 @@
     let isPolling = false;
 
     // ==========================================
-    // 1. HELPER FUNCTIONS (Defined Top to avoid Errors)
+    // 1. HELPER FUNCTIONS
     // ==========================================
 
     function setUIState(state, msg = "Initializing search...") {
         const container = document.getElementById('status-container');
         const txt = document.getElementById('status-text');
         
-        if (!container || !txt) return; // Safety check
+        if (!container || !txt) return;
 
         if (state === 'searching') {
             container.classList.remove('hidden');
@@ -121,16 +127,35 @@
         }
     }
 
-    async function handleReload() {
-        // Notify server we are leaving
+    // NEW: Cancel Search Logic
+    async function cancelSearch() {
+        console.log("Cancelling search...");
+        
+        // 1. Stop the browser polling immediately
+        isPolling = false;
+
+        // 2. Reset UI to "Idle" (Show Find Match button again)
+        setUIState('idle');
+
+        // 3. Tell backend to remove us from the queue
+        // We reuse /leave because it cleans up 'searching' status too.
         try {
             await fetch('/api/matchmaking/leave', { 
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${userToken}` }
             });
-        } catch(e) { console.warn("Leave failed", e); }
-        
-        // Always force reload to clear WASM memory
+        } catch(e) { 
+            console.warn("Cancel request failed", e); 
+        }
+    }
+
+    async function handleReload() {
+        try {
+            await fetch('/api/matchmaking/leave', { 
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${userToken}` }
+            });
+        } catch(e) {}
         window.location.reload();
     }
 
@@ -138,20 +163,16 @@
         const modal = document.getElementById('game-over-modal');
         if (!modal) return;
 
-        // Update Text
         const title = modal.querySelector('h2');
         if (title) {
             title.innerText = reason;
-            if (reason === "Opponent Disconnected") {
-                title.classList.add('text-red-500');
-            } else {
-                title.classList.remove('text-red-500');
-            }
+            title.className = reason === "Opponent Disconnected" 
+                ? "text-4xl font-bold mb-4 text-red-500" 
+                : "text-4xl font-bold mb-4 text-white";
         }
 
         modal.classList.remove('hidden');
 
-        // Cleanup Server in background
         try {
             fetch('/api/matchmaking/leave', { 
                 method: 'POST',
@@ -179,7 +200,8 @@
             startPolling();
         } catch (err) {
             console.error(err);
-            setUIState('idle', "Error starting search.");
+            setUIState('idle');
+            alert("Could not start search: " + err.message);
         }
     }
 
@@ -231,11 +253,13 @@
                         if (idleRetries < 5) {
                             setTimeout(poll, 1000);
                         } else {
-                            isPolling = false;
-                            setUIState('idle');
+                            // Only stop if we really think it's idle and user hasn't cancelled
+                            if (isPolling) {
+                                isPolling = false;
+                                setUIState('idle');
+                            }
                         }
                     } else {
-                        // Match Found
                         isPolling = false;
                         try {
                             const ticket = JSON.parse(text);
@@ -258,7 +282,6 @@
         try {
             await init(); 
             
-            // WATCHDOG: Detects if server dies/opponent leaves
             const gameWatcher = setInterval(async () => {
                 try {
                     const t = new Date().getTime();
@@ -276,7 +299,6 @@
                 } catch(e) {}
             }, 2000);
 
-            // Launch Game
             await run_game("nineball-canvas", ticket.gateway_url, ticket.handoff_token);
             
             clearInterval(gameWatcher);
@@ -300,9 +322,10 @@
     // ==========================================
 
     window.createGame = createGame;
-    window.handleFindMatch = createGame; // Alias for the button
+    window.handleFindMatch = createGame; 
     window.joinGame = joinGame;
     window.handleReload = handleReload;
+    window.cancelSearch = cancelSearch; // <--- Exported Here
     window.onGameFinished = () => showGameOver("Game Over");
 
     window.addEventListener('beforeunload', () => {
