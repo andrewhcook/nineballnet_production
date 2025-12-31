@@ -81,27 +81,21 @@ pub async fn status(
 
 // POST /api/matchmaking/join
 pub async fn join(
+    auth: auth::JWT, // <--- Switch to this extractor
     State(ctx): State<AppContext>,
-    jar: CookieJar,
     Json(params): Json<JoinGameParams>,
 ) -> Result<Response> {
-    // 1. Authenticate
-    let token = jar.get("token").map(|c| c.value()).ok_or_else(|| Error::Unauthorized("No token".into()))?;
-    
-    // We use 'ApiKey' because that is the default column name for tokens in Loco
-    let joiner = Users::find()
-        .filter(users::Column::ApiKey.eq(token))
-        .one(&ctx.db)
-        .await
-        .map_err(|e| Error::DB(e))? 
-        .ok_or_else(|| Error::Unauthorized("Invalid token".into()))?;
+    // 1. Authenticate (Handled by auth::JWT)
+    // We extract the PID directly from the validated token claims
+    let joiner_pid = Uuid::parse_str(&auth.claims.pid).map_err(|_| {
+        Error::BadRequest("Invalid player ID in token".to_string())
+    })?;
 
     let target_match_id = Uuid::parse_str(&params.match_id).map_err(|_| {
         Error::BadRequest("Invalid match ID".to_string())
     })?;
 
     // 2. Transaction Start
-    // CRITICAL FIX: Use closure |e| Error::DB(e) here
     let txn = ctx.db.begin().await.map_err(|e| Error::DB(e))?;
 
     // 3. Find Host's Game
@@ -116,8 +110,9 @@ pub async fn join(
         .await
         .map_err(|e| Error::DB(e))?
         .ok_or_else(|| Error::NotFound)?;
-    
-    if host_match.player_id == joiner.pid {
+
+    // Guard: Prevent joining your own game
+    if host_match.player_id == joiner_pid {
         return Err(Error::BadRequest("Cannot join your own game".into()));
     }
 
@@ -157,7 +152,7 @@ pub async fn join(
     // Insert Joiner (P2)
     let joiner_row = matches::ActiveModel {
         match_id: Set(target_match_id),
-        player_id: Set(joiner.pid),
+        player_id: Set(joiner_pid),
         status: Set("ready".to_string()),
         gateway_url: Set(Some(alloc_data.connect_url.clone())),
         handoff_token: Set(Some(p2_token.clone())),
@@ -167,8 +162,6 @@ pub async fn join(
     };
     joiner_row.insert(&txn).await.map_err(|e| Error::DB(e))?;
 
-    // Commit Transaction
-    // CRITICAL FIX: explicit closure here too
     txn.commit().await.map_err(|e| Error::DB(e))?;
 
     // 6. Return Connection Info
@@ -177,7 +170,6 @@ pub async fn join(
         handoff_token: p2_token,
     })
 }
-
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("api/matchmaking")
