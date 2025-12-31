@@ -102,11 +102,48 @@
 </div>
 
 <script type="module">
-    // 1. Setup & Imports
+        // 1. Setup & Imports
     const userToken = "{{ token }}";
     import init, { run_game } from '/nineball_wasm.js';
 
     let isPolling = false;
+
+    // --- NEW: AUTO-RECONNECT ON LOAD ---
+    document.addEventListener('DOMContentLoaded', async () => {
+        console.log("Checking for existing session...");
+        
+        try {
+            const timestamp = new Date().getTime();
+            const response = await fetch(`/api/matchmaking/status?t=${timestamp}`);
+            
+            if (response.ok) {
+                const text = await response.text();
+                
+                if (text === "idle") {
+                    console.log("User is idle.");
+                    // Do nothing, show the "Find Match" button normally
+                } 
+                else if (text === "searching") {
+                    console.log("User was searching. Resuming poll...");
+                    // Restore "Searching" UI state
+                    document.getElementById('find-match-btn').classList.add('hidden');
+                    document.getElementById('loader').classList.remove('hidden');
+                    document.getElementById('status-text').innerText = "Resuming search...";
+                    
+                    // Restart the loop
+                    startPolling();
+                } 
+                else {
+                    // It's JSON! The user was already in a READY game.
+                    console.log("Reconnecting to active match!");
+                    const ticket = JSON.parse(text);
+                    await handleMatchFound(ticket);
+                }
+            }
+        } catch (err) {
+            console.error("Auto-connect failed:", err);
+        }
+    });
 
     // 2. The Matchmaking Logic (Mapped to 'createGame' for the UI button)
     async function createGame() {

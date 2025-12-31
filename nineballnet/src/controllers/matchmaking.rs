@@ -57,25 +57,38 @@ pub async fn find(
     format::json("Search started")
 }
 
-// GET /api/matchmaking/status (Unchanged)
 pub async fn status(
     auth: auth::JWT,
     State(ctx): State<AppContext>,
 ) -> Result<Response> {
     let player_id = Uuid::parse_str(&auth.claims.pid).map_err(|_| {
-        Error::BadRequest("Invalid player ID format in token".to_string())
+        Error::BadRequest("Invalid player ID".to_string())
     })?;
 
-    let ticket = matches::Entity::find()
+    // Find the most recent active interaction for this player
+    let active_game = Matches::find()
         .filter(matches::Column::PlayerId.eq(player_id))
-        .filter(matches::Column::Status.eq("ready"))
+        // Look for ANY active state
+        .filter(
+            Condition::any()
+                .add(matches::Column::Status.eq("ready"))
+                .add(matches::Column::Status.eq("searching"))
+                .add(matches::Column::Status.eq("open"))
+        )
         .order_by_desc(matches::Column::CreatedAt)
         .one(&ctx.db)
-        .await?;
+        .await
+        .map_err(|e| Error::DB(e))?;
 
-    match ticket {
-        Some(t) => format::json(t),
-        None => format::text("searching"), 
+    match active_game {
+        // CASE 1: Game is Ready -> Send Ticket
+        Some(game) if game.status == "ready" => format::json(game),
+        
+        // CASE 2: Still Waiting -> Tell frontend to keep polling
+        Some(_) => format::text("searching"),
+        
+        // CASE 3: No active game -> Tell frontend to sit idle
+        None => format::text("idle"), 
     }
 }
 
