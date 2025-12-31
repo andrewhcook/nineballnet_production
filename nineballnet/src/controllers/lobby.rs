@@ -1,10 +1,10 @@
 use loco_rs::prelude::*;
+use axum::response::Redirect;
 use axum_extra::extract::cookie::CookieJar;
-use serde::{Serialize, Deserialize};
 use serde_json::json;
 use loco_rs::controller::views::engines::TeraView;
 
-// Import the database entities so we can query matches
+// Import DB entities (Only needed for the 'browse' view now)
 use crate::models::{
     _entities::{matches, users}, 
     matches::Entity as Matches, 
@@ -14,7 +14,7 @@ use sea_orm::{
     EntityTrait, QueryFilter, QueryOrder, QuerySelect, ColumnTrait
 };
 
-#[derive(Serialize)]
+#[derive(serde::Serialize)]
 pub struct LobbyGameView {
     pub id: String,
     pub host_name: String,
@@ -25,14 +25,42 @@ pub struct LobbyGameView {
     pub status: String,
 }
 
+// --- HANDLERS ---
+
+// 1. DEFAULT VIEW: Game Guide & "Find Match" (GET /lobby)
 pub async fn index(
     ViewEngine(v): ViewEngine<TeraView>,
-    State(ctx): State<AppContext>, // Added: Needed for DB access
     jar: CookieJar,
-    auth: auth::JWT,
 ) -> Result<Response> {
-    // 1. DATABASE LOGIC: Fetch the list of open games
-    // ------------------------------------------------
+    // Check Auth
+    let raw_token = match jar.get("token") {
+        Some(c) => c.value().to_string(),
+        None => return Ok(Redirect::to("/auth/login").into_response()),
+    };
+
+    // Render the "Simple" view by default
+    // Ensure your matchmaking HTML is saved as "home/lobby_matchmaking.html" (or similar)
+    format::render().view(
+        &v,
+        "home/matchmaking.html", 
+        json!({
+            "token": raw_token
+        })
+    )
+}
+
+// 2. DETAILED VIEW: Server Browser Table (GET /lobby/browse)
+pub async fn browse(
+    ViewEngine(v): ViewEngine<TeraView>,
+    State(ctx): State<AppContext>,
+    jar: CookieJar,
+) -> Result<Response> {
+    let raw_token = match jar.get("token") {
+        Some(c) => c.value().to_string(),
+        None => return Ok(Redirect::to("/auth/login").into_response()),
+    };
+
+    // Fetch Games List
     let active_requests: Vec<(matches::Model, Option<users::Model>)> = Matches::find()
         .filter(matches::Column::Status.eq("searching")) 
         .order_by_desc(matches::Column::CreatedAt)
@@ -40,16 +68,14 @@ pub async fn index(
         .all(&ctx.db)
         .await?;
 
-    // Map DB results to the View Struct
     let games: Vec<LobbyGameView> = active_requests
         .into_iter()
         .map(|(match_req, user)| {
             let host_name = user.map(|u| u.name).unwrap_or_else(|| "Unknown".to_string());
-            
             LobbyGameView {
                 id: match_req.match_id.to_string(),
                 host_name,
-                host_rating: 1500, // Placeholder until you add rating to Users
+                host_rating: 1500, 
                 rating_provisional: true, 
                 config_description: "Standard 9-Ball".to_string(),
                 is_rated: true,
@@ -58,23 +84,13 @@ pub async fn index(
         })
         .collect();
 
-    // 2. AUTH LOGIC: Get the token for the frontend JS
-    // ------------------------------------------------
-    let raw_token = jar
-        .get("token")
-        .map(|c| c.value())
-        .unwrap_or("");
-
-    // 3. RENDER
-    // ------------------------------------------------
-    // We pass 'games' for the table, and 'token' for the JS buttons
+    // Render the "Table" view
     format::render().view(
         &v, 
-        "home/lobby_visualized.html", // Ensure this path matches where you saved the HTML file!
+        "home/lobby_browse.html", // Rename your old table view to this!
         json!({
             "games": games,
             "token": raw_token,
-            "player_id": auth.claims.pid
         })
     )
 }
@@ -82,5 +98,6 @@ pub async fn index(
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("lobby")
-        .add("/", get(index))
+        .add("/", get(index))      // -> Landing Page (Guide)
+        .add("/browse", get(browse)) // -> Table View
 }
