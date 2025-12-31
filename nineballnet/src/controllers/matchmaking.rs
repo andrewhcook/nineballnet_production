@@ -195,7 +195,6 @@ pub async fn leave(
         Error::BadRequest("Invalid player ID".to_string())
     })?;
 
-    // 1. Find the Active Game
     let active_game = Matches::find()
         .filter(matches::Column::PlayerId.eq(player_id))
         .filter(
@@ -209,34 +208,29 @@ pub async fn leave(
         .map_err(|e| Error::DB(e))?;
 
     if let Some(game) = active_game {
-        // 2. Extract the Handoff Token (The specific game password)
-        // If it's somehow missing (legacy data), we can't secure the call, so we skip it.
-        if let Some(token) = &game.handoff_token {
+        // 1. Notify Allocator (Fire and Forget via Tokio Spawn)
+        if let Some(token) = game.handoff_token.clone() {
+            let match_id = game.match_id.to_string();
             let allocator_url = std::env::var("ALLOCATOR_URL")
                 .unwrap_or_else(|_| "http://localhost:10000".to_string());
             
-            tracing::info!("LEAVE: Requesting deallocation for match {}", game.match_id);
-
-            let client = reqwest::Client::new();
-            
-            // NEW: Send the token in the payload
-            let _ = client.post(format!("{}/deallocate", allocator_url))
-                .json(&serde_json::json!({
-                    "match_id": game.match_id.to_string(),
-                    "token": token // <--- Sending Proof of Ownership
-                }))
-                .send()
-                .await
-                .map_err(|e| {
-                    tracing::error!("LEAVE WARNING: Failed to notify Allocator: {}", e);
-                });
+            // Spawn a background task so we don't block the HTTP response
+            tokio::spawn(async move {
+                let client = reqwest::Client::new();
+                let _ = client.post(format!("{}/deallocate", allocator_url))
+                    .json(&serde_json::json!({
+                        "match_id": match_id,
+                        "token": token
+                    }))
+                    .send()
+                    .await;
+            });
         }
 
-        // 3. Mark Game as Finished in DB
+        // 2. Mark DB as Finished
         let mut active: matches::ActiveModel = game.into();
         active.status = Set("finished".to_string());
         active.updated_at = Set(Utc::now().naive_utc());
-        
         active.save(&ctx.db).await.map_err(|e| Error::DB(e))?;
     }
 

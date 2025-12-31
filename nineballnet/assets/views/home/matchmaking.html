@@ -91,9 +91,19 @@
     window.handleReturnToLobby = handleReturnToLobby;
     window.onGameFinished = showGameOver; // Exported for WASM
 
-    // --- 2. AUTO-RECONNECT ON LOAD ---
+   // --- 2. AUTO-RECONNECT ON LOAD ---
     document.addEventListener('DOMContentLoaded', async () => {
+        
+        // NEW: Check if we just manually left a game
+        if (sessionStorage.getItem("just_left_game") === "true") {
+            console.log("User manually left previous game. Skipping auto-reconnect.");
+            sessionStorage.removeItem("just_left_game"); // Clear it for next time
+            setUIState('idle'); // Force UI to idle
+            return; // STOP HERE
+        }
+
         console.log("Checking session status...");
+        // ... (The rest of your existing auto-reconnect logic) ...
         try {
             // Bust cache with timestamp
             const t = new Date().getTime();
@@ -239,17 +249,47 @@
     }
 
     async function handleReturnToLobby() {
-        // Securely notify server to free resources
+        console.log("Returning to lobby...");
+        
+        // 1. UI Feedback
+        document.body.style.cursor = 'wait';
+        const modalBtn = document.querySelector('#game-over-modal button:last-child');
+        if(modalBtn) modalBtn.innerText = "Leaving...";
+
         try {
-            await fetch('/api/matchmaking/leave', { 
+            // 2. Call Leave Endpoint
+            const response = await fetch('/api/matchmaking/leave', { 
                 method: 'POST',
-                headers: { 'Authorization': `Bearer ${userToken}` }
+                headers: { 
+                    'Authorization': `Bearer ${userToken}`,
+                    'Content-Type': 'application/json' // Good practice
+                }
             });
-        } catch(e) { console.warn("Leave failed", e); }
 
-        window.location.reload();
+            if (!response.ok) {
+                const errText = await response.text();
+                console.error("Leave failed:", errText);
+                alert("Server Error: " + errText);
+                // Do NOT reload if the server failed, or we loop.
+                document.body.style.cursor = 'default';
+                if(modalBtn) modalBtn.innerText = "Back to Lobby";
+                return; 
+            }
+
+            // 3. Success - NOW we reload
+            console.log("Leave successful. Reloading...");
+            
+            // Optional: Set a flag so next load knows we just quit
+            sessionStorage.setItem("just_left_game", "true");
+            
+            window.location.reload();
+
+        } catch(e) { 
+            console.error("Network error during leave:", e);
+            alert("Network connection lost. Could not notify server.");
+            document.body.style.cursor = 'default';
+        }
     }
-
     // Helper: Toggle UI States
     function setUIState(state) {
         const btn = document.getElementById('find-match-btn');
