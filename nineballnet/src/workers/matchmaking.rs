@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 use loco_rs::prelude::*;
 use crate::models::_entities::matches;
 use sea_orm::{ActiveValue::Set, ActiveModelTrait};
-// CRITICAL IMPORT: Needed for deleting old records
 use sea_orm::{ColumnTrait, QueryFilter, EntityTrait}; 
 use async_trait::async_trait;
 use chrono::Utc;
@@ -33,8 +32,36 @@ impl BackgroundWorker<MatchmakingWorkerArgs> for MatchmakingWorker {
 
     async fn perform(&self, args: MatchmakingWorkerArgs) -> Result<()> {
         let queue_key = "matchmaking_queue";
+        let now = Utc::now().naive_utc();
+
+        // ---------------------------------------------------------
+        // 1. IMMEDIATE STATUS UPDATE: "SEARCHING"
+        // ---------------------------------------------------------
+        // First, remove any stale records so we don't have duplicates
+        let _ = matches::Entity::delete_many()
+            .filter(matches::Column::PlayerId.eq(args.player_id))
+            .exec(&self.ctx.db)
+            .await;
+
+        // Insert the "Searching" record. 
+        // This ensures the user appears in the Lobby View immediately.
+        let searching_record = matches::ActiveModel {
+            match_id: Set(Uuid::new_v4()), // Temporary ID
+            player_id: Set(args.player_id),
+            status: Set("searching".to_string()), // <--- THE FIX
+            created_at: Set(now),
+            updated_at: Set(now),
+            ..Default::default()
+        };
         
-        // 1. Connect to Redis
+        searching_record.insert(&self.ctx.db).await
+            .map_err(|e| Error::Message(format!("Failed to set searching status: {}", e)))?;
+
+        println!("WORKER: Player {} status set to SEARCHING", args.player_id);
+
+        // ---------------------------------------------------------
+        // 2. REDIS QUEUE LOGIC
+        // ---------------------------------------------------------
         let redis_url = std::env::var("REDIS_URL")
             .unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
 
@@ -44,21 +71,23 @@ impl BackgroundWorker<MatchmakingWorkerArgs> for MatchmakingWorker {
         let mut redis = client.get_multiplexed_async_connection().await
             .map_err(|e| Error::Message(format!("Redis Connection Failed: {}", e)))?;
 
-        // 2. Queue Logic
         let _: () = redis.rpush(queue_key, args.player_id.to_string()).await
             .map_err(|e| Error::Message(format!("Redis Push Error: {}", e)))?;
         
-        println!("WORKER: Player {} added to queue.", args.player_id);
-
+        // Check Queue Size
         let queue_len: isize = redis.llen(queue_key).await
             .map_err(|e| Error::Message(e.to_string()))?;
 
         if queue_len < 2 {
             println!("WORKER: Waiting for opponent (Queue: {})", queue_len);
+            // We return OK here. The "searching" record created in Step 1 remains in the DB,
+            // so the user sees themselves in the list.
             return Ok(());
         }
 
-        // Pop 2 Players
+        // ---------------------------------------------------------
+        // 3. MATCH FOUND Logic
+        // ---------------------------------------------------------
         let p1_str: Option<String> = redis.lpop(queue_key, None).await.ok();
         let p2_str: Option<String> = redis.lpop(queue_key, None).await.ok();
 
@@ -71,31 +100,27 @@ impl BackgroundWorker<MatchmakingWorkerArgs> for MatchmakingWorker {
             _ => return Ok(()),
         };
 
-        if p1_id == p2_id {
-             return Ok(());
-        }
+        if p1_id == p2_id { return Ok(()); }
 
         println!("WORKER: MATCH FOUND! {} vs {}", p1_id, p2_id);
 
-        // --- CRITICAL FIX: CLEANUP OLD MATCHES ---
-        // This deletes any previous "Ready" records for these players.
-        // Without this, the frontend grabs the OLD match (Port 8000) instead of the new one.
+        // --- CLEANUP "SEARCHING" RECORDS ---
+        // This is crucial. We must delete the "searching" records we created in Step 1
+        // before we insert the final "ready" records.
         matches::Entity::delete_many()
             .filter(matches::Column::PlayerId.eq(Uuid::parse_str(&p1_id).unwrap()))
             .exec(&self.ctx.db)
-            .await
-            .map_err(|e| Error::Message(format!("DB Cleanup P1 Failed: {}", e)))?;
+            .await?;
 
         matches::Entity::delete_many()
             .filter(matches::Column::PlayerId.eq(Uuid::parse_str(&p2_id).unwrap()))
             .exec(&self.ctx.db)
-            .await
-            .map_err(|e| Error::Message(format!("DB Cleanup P2 Failed: {}", e)))?;
+            .await?;
 
-
-        // 3. Allocator Logic
+        // ---------------------------------------------------------
+        // 4. ALLOCATOR & FINAL INSERT
+        // ---------------------------------------------------------
         let match_uuid = Uuid::new_v4();
-        // Generate NEW random tokens for this specific match
         let p1_token = Uuid::new_v4().to_string(); 
         let p2_token = Uuid::new_v4().to_string(); 
 
@@ -123,9 +148,7 @@ impl BackgroundWorker<MatchmakingWorkerArgs> for MatchmakingWorker {
         
         println!("WORKER: Server allocated at {}", allocation.connect_url);
 
-        // 4. DB Updates (Insert NEW match)
-        let now = Utc::now().naive_utc();
-
+        // Insert Final "Ready" Records
         let record_p1 = matches::ActiveModel {
             match_id: Set(match_uuid),
             player_id: Set(Uuid::parse_str(&p1_id).unwrap()),
@@ -151,7 +174,7 @@ impl BackgroundWorker<MatchmakingWorkerArgs> for MatchmakingWorker {
         record_p1.insert(&self.ctx.db).await.map_err(|e| Error::Message(e.to_string()))?;
         record_p2.insert(&self.ctx.db).await.map_err(|e| Error::Message(e.to_string()))?;
 
-        println!("WORKER: DB updated.");
+        println!("WORKER: DB updated to READY.");
         Ok(())
     }
 }
