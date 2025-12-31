@@ -42,50 +42,57 @@ println!("Allocator Proxy listening on {}", addr);
     axum::serve(listener, app).await.unwrap();
 }
 
-// --- THE NEW PROXY HANDLER ---
 async fn proxy_handler(
     ws: WebSocketUpgrade,
     Path(match_id): Path<String>,
     Query(params): Query<HashMap<String, String>>,
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
-    // 1. Find the internal port for this match
-    let target_port = {
+    // 1. Find Port AND Activity Tracker
+    let (target_port, activity_tracker) = {
         let servers = state.active_servers.lock().unwrap();
-        // In a real app, you'd map match_id -> port efficiently. 
-        // Here we scan for simplicity.
-        servers.iter().find(|(_, p)| p.match_id == match_id).map(|(port, _)| *port)
+        
+        // Find the match
+        match servers.iter().find(|(_, p)| p.match_id == match_id) {
+            Some((port, process)) => (*port, process.last_active.clone()), // Clone the Arc
+            None => return (StatusCode::NOT_FOUND, "Match not found").into_response(),
+        }
     };
 
-    let target_port = match target_port {
-        Some(p) => p,
-        None => return (StatusCode::NOT_FOUND, "Match not found").into_response(),
-    };
-
-    // 2. Extract Token to pass along
     let token_query = params.get("token").cloned().unwrap_or_default();
 
-    // 3. Upgrade Client Connection to WebSocket
     ws.on_upgrade(move |client_socket| async move {
-        handle_proxy(client_socket, target_port, token_query).await;
+        // Pass the tracker to the handler
+        handle_proxy(client_socket, target_port, token_query, activity_tracker).await;
     })
 }
 
-async fn handle_proxy(mut client_socket: WebSocket, port: u16, token: String) {
-    // 4. Connect internally to the Local Game Process
-    // Note: The game server is running on localhost inside the same Render container
+
+async fn handle_proxy(
+    mut client_socket: WebSocket, 
+    port: u16, 
+    token: String, 
+    last_active: Arc<Mutex<Instant>> // <--- NEW ARGUMENT
+) {
     let local_url = format!("ws://127.0.0.1:{}/?token={}", port, token);
     
     match connect_async(local_url).await {
         Ok((mut game_socket, _)) => {
-            println!("Proxy established for port {}", port);
-            
-            // 5. Bridge the two streams (Client <-> Allocator <-> Game)
             let (mut client_sender, mut client_receiver) = client_socket.split();
             let (mut game_sender, mut game_receiver) = game_socket.split();
 
+            // Helper to update time
+            let touch_activity = || {
+                if let Ok(mut t) = last_active.lock() {
+                    *t = Instant::now();
+                }
+            };
+
+            // 1. Client -> Game
             let client_to_game = async {
                 while let Some(Ok(msg)) = client_receiver.next().await {
+                    touch_activity(); // <--- Update time on input
+                    
                     let tungsten_msg = match msg {
                         Message::Text(t) => TungMessage::Text(t),
                         Message::Binary(b) => TungMessage::Binary(b),
@@ -93,14 +100,17 @@ async fn handle_proxy(mut client_socket: WebSocket, port: u16, token: String) {
                             let _ = game_sender.close().await;
                             break;
                         },
-                        _ => continue, // Ignore Pings for now
+                        _ => continue,
                     };
                     if game_sender.send(tungsten_msg).await.is_err() { break; }
                 }
             };
 
+            // 2. Game -> Client
             let game_to_client = async {
                 while let Some(Ok(msg)) = game_receiver.next().await {
+                    touch_activity(); // <--- Update time on output
+
                     let axum_msg = match msg {
                         TungMessage::Text(t) => Message::Text(t),
                         TungMessage::Binary(b) => Message::Binary(b),
@@ -114,17 +124,14 @@ async fn handle_proxy(mut client_socket: WebSocket, port: u16, token: String) {
                 }
             };
 
-            // Run both directions until one fails
             tokio::select! {
                 _ = client_to_game => {},
                 _ = game_to_client => {},
             }
         }
-        Err(e) => eprintln!("Failed to connect to local game server: {}", e),
+        Err(e) => eprintln!("Proxy connection failed: {}", e),
     }
 }
-
-
 
 use serde::{Deserialize, Serialize};
 use std::{
@@ -146,6 +153,8 @@ struct ServerProcess {
     child: Child,
     started_at: Instant,
     match_id: String,
+    // NEW: Thread-safe timestamp
+    last_active: Arc<Mutex<Instant>>, 
 }
 
 // Thread-safe state shared between the API and the Reaper
@@ -173,10 +182,10 @@ struct AllocateResponse {
 
 
 
-// --- REAPER LOGIC ---
 async fn run_reaper(state: Arc<AppState>) {
     let check_interval = Duration::from_secs(5);
-    info!("Reaper task started. Checking for zombie processes every 5s.");
+    // 5 Minute Timeout
+    let timeout_duration = Duration::from_secs(300); 
 
     loop {
         tokio::time::sleep(check_interval).await;
@@ -184,33 +193,45 @@ async fn run_reaper(state: Arc<AppState>) {
         let mut servers = state.active_servers.lock().unwrap();
         let mut ports_to_free = Vec::new();
 
-        // Check every active server
         for (port, process) in servers.iter_mut() {
-            // try_wait() returns Ok(Some(status)) if the process has exited
+            let mut should_kill = false;
+
+            // CHECK 1: Has it crashed naturally?
             match process.child.try_wait() {
-                Ok(Some(status)) => {
-                    info!(
-                        "Reaping server for match {} on port {}. Exit status: {}", 
-                        process.match_id, port, status
-                    );
+                Ok(Some(_)) => {
+                    info!("Process on port {} exited naturally", port);
                     ports_to_free.push(*port);
+                    continue; // Skip the timeout check
                 },
-                Ok(None) => {
-                    // Process is still running. 
-                    // Optional: Check if it's been running too long (e.g., > 1 hour) and kill it?
-                    // if process.started_at.elapsed() > Duration::from_secs(3600) { ... }
-                },
-                Err(e) => error!("Error checking process on port {}: {}", port, e),
+                Ok(None) => {}, // Still running
+                Err(_) => {},
+            }
+
+            // CHECK 2: Is it idle?
+            if let Ok(last_active) = process.last_active.lock() {
+                if last_active.elapsed() > timeout_duration {
+                    warn!("Timeout: Killing match {} on port {} (Idle > 5m)", process.match_id, port);
+                    should_kill = true;
+                }
+            }
+
+            // PERFORM KILL
+            if should_kill {
+                if let Err(e) = process.child.kill() {
+                    error!("Failed to kill process on port {}: {}", port, e);
+                } else {
+                    // Force wait to clean up zombie in OS table
+                    let _ = process.child.wait(); 
+                    ports_to_free.push(*port);
+                }
             }
         }
 
-        // Remove dead servers from the map to free up the ports
         for port in ports_to_free {
             servers.remove(&port);
         }
     }
 }
-
 // --- HANDLERS ---
 
 async fn allocate_server(
@@ -251,11 +272,14 @@ async fn allocate_server(
     match spawn_result {
         Ok(child) => {
             // 3. Track the Process
-            servers.insert(port, ServerProcess {
-                child,
-                started_at: Instant::now(),
-                match_id: payload.clone().match_id.clone(),
-            });
+           // Inside allocate_server, when inserting into the map:
+           servers.insert(port, ServerProcess {
+            child,
+            started_at: Instant::now(),
+            match_id: payload.clone().match_id.clone(),
+            // NEW: Initialize with current time
+            last_active: Arc::new(Mutex::new(Instant::now())), 
+        });
 
             // 4. Return Connection Info
             // Returns: ws://203.0.113.45:8001
