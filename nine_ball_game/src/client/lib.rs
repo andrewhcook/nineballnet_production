@@ -598,10 +598,44 @@ fn aim_system(connection_ticket: Res<ConnectionTicket>, mut network_client: ResM
                     if let Ok(ball_reaction_vector_entity) = ball_reaction_angle_query.get_single() {
                         if let Ok((contact_ball, contact_ball_transform)) = pool_ball_query.get(collider_entity) {
 
-                            let second_end_point = contact_ball_transform.translation;
-                            let ball_reaction_vector =  details.normal1;
-                            commands.entity(ball_reaction_vector_entity)
-                            .insert(Collider::polyline(vec![second_end_point, second_end_point - ball_reaction_vector.normalize_or_zero() * 2.0] , Some(vec![[0,1]])));
+                            let aim_dir = direction_of_aimer.normalize_or_zero();
+                            let ghost_ball_center = cue_ball.translation + (aim_dir * shape_hit.time_of_impact);
+
+                            // 2. Calculate Object Ball Path (The Impact Normal)
+                            // Rapier's normal2 points FROM the Object Ball TO the Cue Ball.
+                            // The Object Ball moves in the opposite direction (away from the hit).
+                            let object_travel_dir = -details.normal2.normalize_or_zero();
+
+                            // 3. Calculate Cue Ball Deflection (The Tangent / 90-Degree Rule)
+                            // The Cue Ball slides along the "tangent line" (perpendicular to the object path).
+                            // We calculate this by removing the "impact component" from the original direction.
+                            // Formula: Tangent = Original - (Original · Normal) * Normal
+                            let parallel_component = aim_dir.dot(object_travel_dir) * object_travel_dir;
+                            let cue_deflection_dir = (aim_dir - parallel_component).normalize_or_zero();
+                                // A. Update the Main Aimer Line (Cue Ball -> Ghost Ball)
+                                commands.entity(aimer).insert(Collider::polyline(
+                                    vec![cue_ball.translation, ghost_ball_center], 
+                                    Some(vec![[0, 1]])
+                                ));
+
+                                // B. Draw the Object Ball Path (The "Cut")
+                                // This draws a line starting from the Object Ball's center, extending outwards.
+                                if let Ok(ball_reaction_entity) = ball_reaction_angle_query.get_single() {
+                                    let object_center = contact_ball_transform.translation;
+                                    commands.entity(ball_reaction_entity).insert(Collider::polyline(
+                                        vec![object_center, object_center + object_travel_dir * 3.0], // 3.0m visualization length
+                                        Some(vec![[0, 1]])
+                                    ));
+                                }
+
+                                // C. Draw the Cue Ball Deflection (The "White" Path)
+                                // This draws a line from the Ghost Ball, moving 90 degrees from the object ball.
+                                if let Ok(reaction_angle_entity) = reaction_angle_query.get_single() {
+                                    commands.entity(reaction_angle_entity).insert(Collider::polyline(
+                                        vec![ghost_ball_center, ghost_ball_center + cue_deflection_dir * 2.0], 
+                                        Some(vec![[0, 1]])
+                                    ));
+                                }
                         
                         }    
                          else {
