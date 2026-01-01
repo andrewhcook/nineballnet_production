@@ -736,9 +736,10 @@ fn aim_system(connection_ticket: Res<ConnectionTicket>, mut network_client: ResM
 fn rotate_torus(mut query: Query<&mut Transform, With<TargetBallTorus>>, time: Res<Time>) {
     let mut counter = 1.0;
     for mut transform in &mut query {
-        transform.rotate_y(time.delta_seconds() / 0.25);
-        transform.rotate_x(time.delta_seconds() / 0.25);
-        transform.rotate_z(time.delta_seconds() / 0.25);
+        transform.rotate_y(time.delta_seconds() / 0.25 * counter);
+        transform.rotate_x(time.delta_seconds() / 0.25 * counter);
+        transform.rotate_z(time.delta_seconds() / 0.25 * counter);
+        counter *= -1.0;
     }
 }
 
