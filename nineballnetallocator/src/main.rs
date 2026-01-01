@@ -283,8 +283,18 @@ async fn handle_proxy(
 
 // --- BACKGROUND TASKS ---
 async fn run_reaper(state: Arc<AppState>) {
-    let check_interval = Duration::from_secs(5);
-    let timeout_duration = Duration::from_secs(300); // 5 mins idle timeout
+    let check_interval = Duration::from_secs(2); // Check often
+    let timeout_duration = Duration::from_secs(300);
+
+    // CONFIG: Where is Loco?
+    // In Docker/Render, this might be the internal service URL
+    let callback_url = std::env::var("LOCO_CALLBACK_URL")
+        .unwrap_or_else(|_| "http://localhost:3000/api/matchmaking/internal_finish".to_string());
+    
+    let internal_secret = std::env::var("INTERNAL_API_KEY")
+        .unwrap_or_else(|_| "super-secret-key".to_string());
+
+    let client = reqwest::Client::new();
 
     loop {
         tokio::time::sleep(check_interval).await;
@@ -295,29 +305,52 @@ async fn run_reaper(state: Arc<AppState>) {
         for (port, process) in servers.iter_mut() {
             let mut should_kill = false;
 
-            // 1. Check if process exited naturally
+            // 1. Check if process exited naturally (Game Over)
             match process.child.try_wait() {
                 Ok(Some(_)) => {
-                    info!("Process on port {} exited naturally", port);
+                    info!("Process on port {} exited naturally (Game Over)", port);
+                    
+                    // --- THE FIX: Notify Loco ---
+                    let m_id = process.match_id.clone();
+                    let url = callback_url.clone();
+                    let secret = internal_secret.clone();
+                    let c = client.clone();
+
+                    // Fire and forget: Tell Loco to update DB to 'finished'
+                    tokio::spawn(async move {
+                        let _ = c.post(&url)
+                            .json(&serde_json::json!({ 
+                                "match_id": m_id,
+                                "secret": secret
+                            }))
+                            .send()
+                            .await;
+                    });
+                    // ----------------------------
+
                     ports_to_free.push(*port);
                     continue; 
                 },
-                _ => {}, 
+                Ok(None) => {}, // Still running
+                Err(_) => {},
             }
 
-            // 2. Check for idle timeout
+            // 2. Check for idle timeout (Zombie)
             if let Ok(last_active) = process.last_active.lock() {
                 if last_active.elapsed() > timeout_duration {
-                    warn!("TIMEOUT: Killing match {} on port {} (Idle > 5m)", process.match_id, port);
+                    warn!("TIMEOUT: Killing match {} (Idle)", process.match_id);
                     should_kill = true;
                 }
             }
 
             if should_kill {
                 if let Err(e) = process.child.kill() {
-                    error!("Failed to kill process on port {}: {}", port, e);
+                    error!("Kill failed: {}", e);
                 } else {
-                    let _ = process.child.wait(); // Clean up zombie
+                    let _ = process.child.wait();
+                    
+                    // Optional: You might want to notify Loco here too if you want 
+                    // timeouts to show as "Game Over" instead of just dying.
                     ports_to_free.push(*port);
                 }
             }

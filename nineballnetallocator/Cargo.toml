@@ -5,7 +5,6 @@ edition = "2021"
 
 [dependencies]
 # Add these to existing deps
-tokio-tungstenite = "0.20"
 futures-util = "0.3"
 axum = {version = "0.7", features = ["ws"]}
 tokio = { version = "1.0", features = ["full"] }
@@ -21,3 +20,5 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dotenvy = "0.15"
 # Process management
 sysinfo = "0.30" # Optional, but good for deeper monitoring if needed later
+tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
+reqwest = { version = "0.11", features = ["json", "native-tls"] }
