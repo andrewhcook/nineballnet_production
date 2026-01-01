@@ -84,7 +84,7 @@ struct SpinSelector;
 #[derive(Component)]
 struct SecondWindow;
 
-const DEFAULT_WALL_COLOR: Color = Color::Hsla(Hsla::new(15.0, 0.65, 0.20, 1.0));
+const DEFAULT_WALL_COLOR: Color = Color::Hsla(Hsla::new(25.0, 0.60, 0.10, 1.0));
 
 const DEFAULT_FELT_COLOR: Color = Color::Hsla(Hsla::new(210.0, 0.65, 0.45, 1.0));
 
@@ -214,8 +214,8 @@ fn configure_app(app: &mut App) {
        .add_systems(Update, (
            handle_network, 
            render_gamestate,
-           show_numbers_above_pool_balls, 
-           rotate_numbers_around_pool_balls
+           //show_numbers_above_pool_balls, 
+           //rotate_numbers_around_pool_balls
        ))
        .add_systems(Update, (
            aim_system, 
@@ -456,7 +456,7 @@ fn spawn_pool_balls(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>,   
                 transform: Transform::from_translation(Vec3::new(0.0, STANDARD_BALL_RADIUS, 0.0)),
                 ..default()
             }
-        );
+        ).insert(Collider::ball(STANDARD_BALL_RADIUS));
     }
 }
 
@@ -697,37 +697,60 @@ fn show_numbers_above_pool_balls(mut commands: Commands, mut ball_query: Query<(
     }
 }
 
-fn setup_numbers_above_pool_balls( mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>, ball_query: Query<(Entity, &Transform, &PoolBalls)>) {
+fn setup_numbers_above_pool_balls(
+    mut commands: Commands, 
+    mut meshes: ResMut<Assets<Mesh>>, 
+    mut materials: ResMut<Assets<StandardMaterial>>, 
+    ball_query: Query<(Entity, &PoolBalls)> // Changed query to just get Entity + Component
+) {
     let font_data = include_bytes!("../../assets/fonts/Roboto-Black.ttf");
     let mut generator = MeshGenerator::new(font_data);
-    for (pool_ball_entity, pool_ball_transform, pool_ball_itself) in ball_query.iter() {
-        let translation = pool_ball_transform.translation;
-        let raw_number = pool_ball_itself.0;
-        let number = raw_number.to_string().as_str().to_owned();
-    let transform = Mat4::from_scale(Vec3::new(0.075, 0.075, 0.0075)).to_cols_array();
-    let text_mesh: MeshText = generator
-        .generate_section(&number, false, Some(&transform))
-        .unwrap();
 
-    let vertices = text_mesh.vertices;
-    let positions: Vec<[f32; 3]> = vertices.chunks(3).map(|c| [c[0], c[1], c[2]]).collect();
-    let uvs = vec![[0f32, 0f32]; positions.len()];
-    let mut mesh = Mesh::new(bevy::render::render_resource::PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
-    mesh.compute_flat_normals();
-    let material = match raw_number {
-          1 | 9 => StandardMaterial::from_color(Color::rgb(1.0, 1.0, 0.0)), // Yellow (1 = solid, 9 = stripe)
-        2     => StandardMaterial::from_color(Color::rgb(0.0, 0.0, 1.0)), // Blue
-        3     => StandardMaterial::from_color(Color::rgb(1.0, 0.0, 0.0)), // Red
-        4     => StandardMaterial::from_color(Color::rgb(0.5, 0.0, 0.5)), // Purple
-        5     => StandardMaterial::from_color(Color::rgb(1.0, 0.5, 0.0)), // Orange
-        6     => StandardMaterial::from_color(Color::rgb(0.0, 1.0, 0.0)), // Green
-        7     => StandardMaterial::from_color(Color::rgb(0.5, 0.0, 0.0)), // Maroon
-        8     => StandardMaterial::from_color(Color::BLACK),      
-        _ => StandardMaterial::from_color(Color::linear_rgb(0.60, 0.80, 1.0))
-    };
-    commands.spawn(FloatingNumber(raw_number as usize)).insert(MaterialMeshBundle {mesh: meshes.add(mesh), material: materials.add(material), transform: Transform {translation: Vec3::new(0.0,  0.00, 0.0), rotation: Quat::from_rotation_x(0.0), scale: Vec3::ONE * 1.5},visibility: Visibility::Visible,..default()});
+    for (ball_entity, pool_ball) in ball_query.iter() {
+        let number_str = pool_ball.0.to_string();
+        
+        // Generate the text mesh
+        let transform = Mat4::from_scale(Vec3::new(0.075, 0.075, 0.0075)).to_cols_array();
+        let text_mesh: MeshText = generator
+            .generate_section(&number_str, false, Some(&transform))
+            .unwrap();
+
+        let vertices = text_mesh.vertices;
+        let positions: Vec<[f32; 3]> = vertices.chunks(3).map(|c| [c[0], c[1], c[2]]).collect();
+        let uvs = vec![[0f32, 0f32]; positions.len()];
+        
+        let mut mesh = Mesh::new(bevy::render::render_resource::PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+        mesh.compute_flat_normals();
+
+        // Spawn the Number as a CHILD of the Ball
+        // We spawn it twice (front and back) so you can see it roll from any angle
+        let material_handle = materials.add(StandardMaterial {
+            base_color: Color::BLACK,
+            unlit: true, // Make numbers easy to read even in shadow
+            ..default()
+        });
+        
+        commands.entity(ball_entity).with_children(|parent| {
+            // "Front" Number
+            parent.spawn(MaterialMeshBundle {
+                mesh: meshes.add(mesh.clone()),
+                material: material_handle.clone(),
+                // Position it slightly outside the sphere radius so it doesn't clip
+                transform: Transform::from_translation(Vec3::new(0.0, STANDARD_BALL_RADIUS + 0.001, 0.0))
+                           .with_rotation(Quat::from_rotation_x(-1.57)), // Lay flat on top
+                ..default()
+            });
+
+            // "Side" Number (Optional, helps visualize roll better)
+            parent.spawn(MaterialMeshBundle {
+                mesh: meshes.add(mesh),
+                material: material_handle,
+                transform: Transform::from_translation(Vec3::new(0.0, 0.0, STANDARD_BALL_RADIUS + 0.001)),
+                ..default()
+            });
+        });
     }
 }
 
