@@ -43,7 +43,7 @@
                         <th class="p-3 font-semibold text-right">Mode</th>
                     </tr>
                 </thead>
-                <tbody class="text-sm">
+                <tbody id="lobby-body" class="text-sm">
                     {% if games | length == 0 %}
                         <tr>
                             <td colspan="5" class="p-8 text-center text-gray-500 dark:text-gray-400">
@@ -339,6 +339,77 @@
                 }
             }
         }
+    }
+
+    // --- LOBBY LIVE UPDATES ---
+    
+    // 1. Poll every 3 seconds
+    setInterval(refreshLobby, 3000);
+
+    async function refreshLobby() {
+        try {
+            // Fetch raw JSON list from our new endpoint
+            const res = await fetch('/api/matchmaking/list');
+            if (!res.ok) return;
+            const games = await res.json();
+            
+            updateLobbyTable(games);
+        } catch (e) {
+            console.warn("Lobby refresh failed", e);
+        }
+    }
+
+    function updateLobbyTable(games) {
+        const tbody = document.getElementById('lobby-body');
+        if (!tbody) return;
+
+        if (games.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="5" class="p-8 text-center text-gray-500 dark:text-gray-400">
+                        No open games found. 
+                        <button onclick="createGame()" class="text-blue-600 hover:underline ml-1 font-medium">Create one?</button>
+                    </td>
+                </tr>`;
+            return;
+        }
+
+        // Rebuild rows dynamically
+        // Note: We use template literals (backticks) to generate the HTML
+        tbody.innerHTML = games.map(game => `
+            <tr onclick="joinGame('${game.id}')" 
+                class="group border-b border-gray-100 dark:border-gray-700 hover:bg-blue-50 dark:hover:bg-blue-900/20 cursor-pointer transition-colors">
+                <td class="p-3 text-center">
+                    <span class="inline-block w-3 h-3 rounded-full bg-green-500" title="Open"></span>
+                </td>
+                <td class="p-3 font-medium text-gray-900 dark:text-gray-100 group-hover:text-blue-600">
+                    ${escapeHtml(game.host_name)}
+                </td>
+                <td class="p-3 text-gray-600 dark:text-gray-300">
+                    ${game.host_rating}
+                </td>
+                <td class="p-3 text-gray-600 dark:text-gray-300">
+                    ${game.config_description}
+                </td>
+                <td class="p-3 text-right">
+                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium 
+                        ${game.is_rated ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200' : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'}">
+                        ${game.is_rated ? 'Rated' : 'Casual'}
+                    </span>
+                </td>
+            </tr>
+        `).join('');
+    }
+
+    // Security Helper: Prevent XSS in usernames
+    function escapeHtml(text) {
+        if (!text) return "";
+        return text
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
     }
 
     // ==========================================

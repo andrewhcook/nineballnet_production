@@ -270,6 +270,36 @@ pub async fn leave(
 }
 
 
+// GET /api/matchmaking/list
+pub async fn list(State(ctx): State<AppContext>) -> Result<Response> {
+    // 1. Join Matches with Users to get Host Name/Rating
+    // We want games that are "searching" (waiting for an opponent)
+    let games = Matches::find()
+        .filter(matches::Column::Status.eq("searching")) 
+        .find_also_related(users::Entity)
+        .order_by_desc(matches::Column::CreatedAt)
+        .all(&ctx.db)
+        .await
+        .map_err(|e| Error::DB(e))?;
+
+    // 2. Map to a clean JSON format for the frontend
+    let response_data: Vec<serde_json::Value> = games.into_iter().map(|(game, user)| {
+        let user = user.unwrap(); // Safety: Match must have a player
+        
+        // This JSON structure matches exactly what your JS needs
+        serde_json::json!({
+            "id": game.match_id,
+            "host_name": user.name,
+            "host_rating": "1500?", // Default 1200 if None
+            "config_description": "Nine-Ball", // Hardcoded for now, or fetch from game config
+            "is_rated": true, // Hardcoded or fetch from game config
+            "created_at": game.created_at
+        })
+    }).collect();
+
+    format::json(response_data)
+}
+
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("api/matchmaking")
@@ -277,4 +307,5 @@ pub fn routes() -> Routes {
         .add("/status", get(status))
         .add("/join", post(join))
         .add("/leave", post(leave))
+        .add("/list", get(list))
 }
