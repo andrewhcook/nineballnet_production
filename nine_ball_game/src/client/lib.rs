@@ -151,10 +151,10 @@ commands
     commands.spawn(ShotPower(1.0, true));
     commands.spawn(Aimer).insert(Sensor);
     
- //   commands.spawn(TargetBallTorus)
-   // .insert(MaterialMeshBundle{mesh: meshes.add(TARGET_BALL_TORUS_DIMENSIONS), material: materials.addrail_material), ..default()});
+    commands.spawn(TargetBallTorus)
+    .insert(MaterialMeshBundle{mesh: meshes.add(TARGET_BALL_TORUS_DIMENSIONS), material: rail_material.clone(), ..default()});
 
-   // commands.spawn(TargetBallTorus).insert(MaterialMeshBundle{mesh: meshes.add(TARGET_BALL_TORUS_DIMENSIONS), material: materials.addrail_material), ..default()});;
+    commands.spawn(TargetBallTorus).insert(MaterialMeshBundle{mesh: meshes.add(TARGET_BALL_TORUS_DIMENSIONS), material: rail_material.clone(), ..default()});;
 
 }
 
@@ -219,7 +219,9 @@ fn configure_app(app: &mut App) {
        ))
        .add_systems(Update, (
            aim_system, 
- //          rotate_torus, 
+           rotate_torus, 
+           query_target_ball_torus_in_nine_ball,
+           set_correct_object_ball_after_shot_in_nine_ball,
            display_shot_power, 
            increase_shot_power
        ).run_if(should_show_player_shot_controls))
@@ -231,6 +233,7 @@ fn configure_app(app: &mut App) {
     color: Color::srgb(1.0, 1.0, 1.0),
     brightness: 200.0, // Low brightness so it doesn't wash out shadows
 });
+app.insert_state(CorrectObjectBall(PoolBalls(1)));
 }
 
 
@@ -412,6 +415,38 @@ fn render_gamestate(mut meshes: ResMut<Assets<Mesh>>,   mut materials: ResMut<As
     }
 
 }
+
+fn set_correct_object_ball_after_shot_in_nine_ball(ball_query: Query<&PoolBalls>, mut correct_ball_setter: ResMut<NextState<CorrectObjectBall>>) {
+    let mut lowest = 10;
+
+    for i in ball_query.iter() {
+        if i.0 < lowest {
+            lowest = i.0;
+        }
+    }
+
+    correct_ball_setter.set(CorrectObjectBall(PoolBalls(lowest)));
+    println!("{:?}", lowest);
+
+}
+
+
+fn query_target_ball_torus_in_nine_ball(mut commands: Commands, lowest_numbered_ball: Res<State<CorrectObjectBall>>, torus_query: Query< (Entity, &Transform), With<TargetBallTorus>>, pool_ball_query: Query<(&PoolBalls, &Transform)>) {
+    let lowest_num = lowest_numbered_ball.0.0;
+    let toruses= torus_query.iter();
+    for (ball, transform) in pool_ball_query.iter() {
+        if ball.0 == lowest_num {
+            for (torus, torus_transform) in toruses{
+                commands.entity(torus).insert(TransformBundle::from(Transform {translation: transform.translation,rotation: torus_transform.rotation, ..default() }));
+            }
+            break
+        }
+    }
+}
+
+#[derive(States, Debug, Clone, PartialEq, Eq, Hash)]
+struct CorrectObjectBall(PoolBalls);
+
 
 // --- Ball Spawning (Including User's Preferred Color and Placement Fix) ---
 
@@ -739,44 +774,45 @@ fn setup_numbers_above_pool_balls(
     let font_data = include_bytes!("../../assets/fonts/Roboto-Black.ttf");
     let mut generator = MeshGenerator::new(font_data);
     
-    // 1. REALISTIC DIMENSIONS
-    // Standard pool ball radius is ~0.0285m. 
-    // The number circle is roughly 0.011m (1.1cm) radius.
-    let decal_radius = 0.011; 
+    // 1. DIMENSIONS
+    let decal_radius = 0.011; // 1.1cm (Realistic size)
     
-    // Create the White Circle (Decal)
     let circle_mesh_handle = meshes.add(Circle::new(decal_radius));
+    
+    // White Circle Material
     let circle_material_handle = materials.add(StandardMaterial {
         base_color: Color::WHITE,
         perceptual_roughness: 0.8,
         unlit: true, 
-        depth_bias: 1.0, // Helps prevent Z-fighting with the ball surface
+        // TRICK: Force this to render "on top" of the ball surface
+        depth_bias: 10.0, 
         ..default()
     });
 
+    // Black Text Material
     let text_material_handle = materials.add(StandardMaterial {
         base_color: Color::BLACK,
         unlit: true,
-        depth_bias: 2.0, // Ensures text renders on top of the white circle
+        // TRICK: Force this to render "on top" of the white circle
+        depth_bias: 20.0, 
         ..default()
     });
 
     for (ball_entity, pool_ball) in ball_query.iter() {
         let number_str = pool_ball.0.to_string();
         
-        // 2. TEXT GENERATION & CENTERING
-        // We scale the text to fit comfortably inside the 1.1cm circle
-        let text_scale = Mat4::from_scale(Vec3::new(0.025, 0.025, 0.025));
+        // 2. TEXT GENERATION
+        // Note: Z-scale set to practically zero to ensure flat mesh
+        let text_scale = Mat4::from_scale(Vec3::new(0.025, 0.025, 0.0001));
         
         let text_mesh: MeshText = generator
             .generate_section(&number_str, false, Some(&text_scale.to_cols_array()))
             .unwrap();
 
-        // Calculate bounding box to center the text
+        // Centering Logic
         let vertices = text_mesh.vertices;
         let positions: Vec<[f32; 3]> = vertices.chunks(3).map(|c| [c[0], c[1], c[2]]).collect();
         
-        // Find min/max to calculate width/height
         let mut min_x = f32::MAX; let mut max_x = f32::MIN;
         let mut min_y = f32::MAX; let mut max_y = f32::MIN;
 
@@ -789,8 +825,6 @@ fn setup_numbers_above_pool_balls(
 
         let width = max_x - min_x;
         let height = max_y - min_y;
-        
-        // Center offset: shift left by half width, down by half height
         let center_offset = Vec3::new(-min_x - width / 2.0, -min_y - height / 2.0, 0.0);
 
         let uvs = vec![[0f32, 0f32]; positions.len()];
@@ -800,7 +834,7 @@ fn setup_numbers_above_pool_balls(
         mesh.compute_flat_normals();
         let text_mesh_handle = meshes.add(mesh);
 
-        // 3. SPAWN HELPERS
+        // 3. SPAWN
         let spawn_label = |parent: &mut ChildBuilder, translation: Vec3, rotation: Quat| {
             parent.spawn(MaterialMeshBundle {
                 mesh: circle_mesh_handle.clone(),
@@ -812,26 +846,23 @@ fn setup_numbers_above_pool_balls(
                 circle_parent.spawn(MaterialMeshBundle {
                     mesh: text_mesh_handle.clone(),
                     material: text_material_handle.clone(),
-                    // Apply the centering offset we calculated + slight Z bump
-                    transform: Transform::from_translation(center_offset + Vec3::new(0.0, 0.0, 0.001)),
+                    // THE FIX:
+                    // Previous: 0.001 (1mm gap -> looked deep/floating)
+                    // New:      0.0002 (0.2mm gap -> virtually flat paint)
+                    transform: Transform::from_translation(center_offset + Vec3::new(0.0, 0.0, 0.0002)),
                     ..default()
                 });
             });
         };
 
         commands.entity(ball_entity).with_children(|parent| {
-            // FRONT Label (+Z)
-            // Position: On surface (Radius)
-            // Rotation: None (Faces +Z)
+            // Front (+Z)
             spawn_label(
                 parent, 
                 Vec3::new(0.0, 0.0, STANDARD_BALL_RADIUS), 
                 Quat::IDENTITY
             );
-
-            // BACK Label (-Z)
-            // Position: On surface (-Radius)
-            // Rotation: Flip 180 degrees around Y axis so it reads correctly
+            // Back (-Z)
             spawn_label(
                 parent, 
                 Vec3::new(0.0, 0.0, -STANDARD_BALL_RADIUS), 
