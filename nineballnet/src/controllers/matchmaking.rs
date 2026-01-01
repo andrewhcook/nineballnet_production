@@ -33,6 +33,13 @@ struct AllocatorResponse {
     connect_url: String,
 }
 
+#[derive(Deserialize)]
+pub struct InternalFinishParams {
+    pub match_id: String,
+    pub secret: String, // Simple security
+}
+
+
 // --- HANDLERS ---
 
 // POST /api/matchmaking/find
@@ -300,6 +307,32 @@ pub async fn list(State(ctx): State<AppContext>) -> Result<Response> {
     format::json(response_data)
 }
 
+
+// POST /api/matchmaking/internal_finish
+pub async fn internal_finish(
+    State(ctx): State<AppContext>,
+    Json(params): Json<InternalFinishParams>,
+) -> Result<Response> {
+    // 1. Validate Secret (Load from env in real app, hardcoded for now or use env var)
+    let internal_secret = std::env::var("INTERNAL_API_KEY").map_err(|_|Error::BadRequest("Invalid Key".into()))?;
+    if params.secret != internal_secret {
+        return Err(Error::Unauthorized("Invalid secret".into()));
+    }
+
+    let match_uid = Uuid::parse_str(&params.match_id).map_err(|_| Error::BadRequest("Invalid UUID".into()))?;
+
+    // 2. Mark match as finished
+    // This ensures Watchdogs on the frontend see the game is over
+    matches::Entity::update_many()
+        .col_expr(matches::Column::Status, sea_orm::sea_query::Expr::value("finished"))
+        .filter(matches::Column::MatchId.eq(match_uid))
+        .exec(&ctx.db)
+        .await
+        .map_err(|e| Error::DB(e))?;
+
+    format::text("Match finished")
+}
+
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("api/matchmaking")
@@ -308,4 +341,5 @@ pub fn routes() -> Routes {
         .add("/join", post(join))
         .add("/leave", post(leave))
         .add("/list", get(list))
+        .add("/internal_finish", post(internal_finish))
 }
