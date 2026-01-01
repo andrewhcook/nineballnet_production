@@ -279,14 +279,21 @@
         document.getElementById('game-view').classList.remove('hidden');
         document.getElementById('overlay-status').innerText = "Connecting...";
 
-        // FLAG: Tracks if the game successfully entered the loop
+        // FLAGS
         let gameHasLaunched = false;
+        let gameEndedLocally = false; // <--- NEW: Prevents Watchdog from claiming "Disconnect"
 
         try {
             await init(); 
             
-            // Watchdog (unchanged)
+            // --- WATCHDOG (Polls for opponent disconnects) ---
             const gameWatcher = setInterval(async () => {
+                // If we already know the game ended naturally, stop checking.
+                if (gameEndedLocally) {
+                    clearInterval(gameWatcher);
+                    return;
+                }
+
                 try {
                     const t = new Date().getTime();
                     const res = await fetch(`/api/matchmaking/status?t=${t}`, {
@@ -294,7 +301,9 @@
                     });
                     if (res.ok) {
                         const text = await res.text();
-                        if (text === "finished" || text === "idle") {
+                        // If DB says finished, BUT we haven't finished locally yet...
+                        // It implies the Server died or Opponent quit before we were done.
+                        if ((text === "finished" || text === "idle") && !gameEndedLocally) {
                             console.log("Watchdog: Game ended remotely.");
                             clearInterval(gameWatcher);
                             showGameOver("Opponent Disconnected"); 
@@ -304,13 +313,13 @@
             }, 2000);
 
             // --- RUN GAME ---
-            // This promise rejects immediately with "control flow" when the game starts
-            // OR it rejects with "unreachable" when the game ends via AppExit.
+            // This blocks until the game exits (or crashes)
             await run_game("nineball-canvas", ticket.gateway_url, ticket.handoff_token);
             
-            // If we get here, it was a super clean exit (rare)
+            // If we reach this line, the WASM exited cleanly!
+            gameEndedLocally = true; 
             clearInterval(gameWatcher);
-            showGameOver("Game Over");
+            showGameOver("Game Over"); // Correct Message
 
         } catch (e) {
             const errStr = String(e);
@@ -318,30 +327,31 @@
             // CASE 1: Game Loop Starting (Not an error)
             if (errStr.includes("control flow")) {
                 console.log("Game loop running...");
-                gameHasLaunched = true; // <--- Mark success
+                gameHasLaunched = true; 
                 document.getElementById('overlay-status').innerText = "";
             } 
-            // CASE 2: Game Exiting via AppExit (The "Unreachable" Error)
-            else if (gameHasLaunched && (errStr.includes("unreachable") || errStr.includes("recursive use of an object"))) {
-                console.log("Game exited normally via WASM panic.");
-                showGameOver("Game Over");
+            // CASE 2: WASM Exit via Panic (Also a Natural End)
+            else if (gameHasLaunched && (errStr.includes("unreachable") || errStr.includes("recursive use"))) {
+                console.log("Game exited via WASM panic (Natural End).");
+                gameEndedLocally = true; // <--- Mark as natural
+                clearInterval(gameWatcher);
+                showGameOver("Game Over"); // Correct Message
             }
-            // CASE 3: Actual Crash (Startup failure or unexpected error)
+            // CASE 3: Actual Crash
             else {
                 console.error("WASM Crash:", e);
-                // Only alert if it failed to even start
                 if (!gameHasLaunched) {
                     alert("Game Engine Error: " + errStr);
                     handleReload();
                 } else {
-                    // If it crashed mid-game, just show Game Over (graceful degradation)
+                    // Graceful crash handling
+                    gameEndedLocally = true;
+                    clearInterval(gameWatcher);
                     showGameOver("Game Over");
                 }
             }
         }
-    }
-
-    // --- LOBBY LIVE UPDATES ---
+    }    // --- LOBBY LIVE UPDATES ---
     
     // 1. Poll every 3 seconds
     setInterval(refreshLobby, 3000);
