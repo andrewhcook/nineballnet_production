@@ -604,7 +604,7 @@ fn aim_system(connection_ticket: Res<ConnectionTicket>, mut network_client: ResM
                             // 2. Calculate Object Ball Path (The Impact Normal)
                             // Rapier's normal2 points FROM the Object Ball TO the Cue Ball.
                             // The Object Ball moves in the opposite direction (away from the hit).
-                            let object_travel_dir = -details.normal2.normalize_or_zero();
+                            let object_travel_dir = details.normal2.normalize_or_zero();
 
                             // 3. Calculate Cue Ball Deflection (The Tangent / 90-Degree Rule)
                             // The Cue Ball slides along the "tangent line" (perpendicular to the object path).
@@ -730,7 +730,6 @@ fn show_numbers_above_pool_balls(mut commands: Commands, mut ball_query: Query<(
         }
     }
 }
-
 fn setup_numbers_above_pool_balls(
     mut commands: Commands, 
     mut meshes: ResMut<Assets<Mesh>>, 
@@ -740,81 +739,102 @@ fn setup_numbers_above_pool_balls(
     let font_data = include_bytes!("../../assets/fonts/Roboto-Black.ttf");
     let mut generator = MeshGenerator::new(font_data);
     
-    // Shared Resources
-    // 1. The White Circle Background (The "Decal")
-    let circle_mesh_handle = meshes.add(Circle::new(0.025)); // 2.5cm radius circle
+    // 1. REALISTIC DIMENSIONS
+    // Standard pool ball radius is ~0.0285m. 
+    // The number circle is roughly 0.011m (1.1cm) radius.
+    let decal_radius = 0.011; 
+    
+    // Create the White Circle (Decal)
+    let circle_mesh_handle = meshes.add(Circle::new(decal_radius));
     let circle_material_handle = materials.add(StandardMaterial {
         base_color: Color::WHITE,
         perceptual_roughness: 0.8,
-        unlit: true, // Always bright white
+        unlit: true, 
+        depth_bias: 1.0, // Helps prevent Z-fighting with the ball surface
         ..default()
     });
 
-    // 2. The Black Number Material
     let text_material_handle = materials.add(StandardMaterial {
         base_color: Color::BLACK,
-        unlit: true, // Always readable
+        unlit: true,
+        depth_bias: 2.0, // Ensures text renders on top of the white circle
         ..default()
     });
 
     for (ball_entity, pool_ball) in ball_query.iter() {
         let number_str = pool_ball.0.to_string();
         
-        // Generate Text Mesh
-        // We center the text using the generator's transform
-        let transform = Mat4::from_scale(Vec3::new(0.05, 0.05, 0.05)) // Smaller text scale
-             .mul_mat4(&Mat4::from_translation(Vec3::new(-0.25, -0.25, 0.0))); // Rough centering adjustment
-             
+        // 2. TEXT GENERATION & CENTERING
+        // We scale the text to fit comfortably inside the 1.1cm circle
+        let text_scale = Mat4::from_scale(Vec3::new(0.025, 0.025, 0.025));
+        
         let text_mesh: MeshText = generator
-            .generate_section(&number_str, false, Some(&transform.to_cols_array()))
+            .generate_section(&number_str, false, Some(&text_scale.to_cols_array()))
             .unwrap();
 
+        // Calculate bounding box to center the text
         let vertices = text_mesh.vertices;
         let positions: Vec<[f32; 3]> = vertices.chunks(3).map(|c| [c[0], c[1], c[2]]).collect();
-        let uvs = vec![[0f32, 0f32]; positions.len()];
         
+        // Find min/max to calculate width/height
+        let mut min_x = f32::MAX; let mut max_x = f32::MIN;
+        let mut min_y = f32::MAX; let mut max_y = f32::MIN;
+
+        for pos in &positions {
+            if pos[0] < min_x { min_x = pos[0]; }
+            if pos[0] > max_x { max_x = pos[0]; }
+            if pos[1] < min_y { min_y = pos[1]; }
+            if pos[1] > max_y { max_y = pos[1]; }
+        }
+
+        let width = max_x - min_x;
+        let height = max_y - min_y;
+        
+        // Center offset: shift left by half width, down by half height
+        let center_offset = Vec3::new(-min_x - width / 2.0, -min_y - height / 2.0, 0.0);
+
+        let uvs = vec![[0f32, 0f32]; positions.len()];
         let mut mesh = Mesh::new(bevy::render::render_resource::PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
         mesh.compute_flat_normals();
         let text_mesh_handle = meshes.add(mesh);
 
-        // We use a helper closure to spawn the label twice (Front and Back)
-        let spawn_label = |parent: &mut ChildBuilder, offset: Vec3, rotation: Quat| {
-            // A. The White Circle
+        // 3. SPAWN HELPERS
+        let spawn_label = |parent: &mut ChildBuilder, translation: Vec3, rotation: Quat| {
             parent.spawn(MaterialMeshBundle {
                 mesh: circle_mesh_handle.clone(),
                 material: circle_material_handle.clone(),
-                transform: Transform::from_translation(offset)
-                    .with_rotation(rotation),
+                transform: Transform::from_translation(translation).with_rotation(rotation),
                 ..default()
             })
             .with_children(|circle_parent| {
-                // B. The Number (Child of the circle)
                 circle_parent.spawn(MaterialMeshBundle {
                     mesh: text_mesh_handle.clone(),
                     material: text_material_handle.clone(),
-                    // Slight Z-offset so it sits ON TOP of the white circle
-                    transform: Transform::from_translation(Vec3::new(-0.015, -0.015, 0.001)), 
+                    // Apply the centering offset we calculated + slight Z bump
+                    transform: Transform::from_translation(center_offset + Vec3::new(0.0, 0.0, 0.001)),
                     ..default()
                 });
             });
         };
 
         commands.entity(ball_entity).with_children(|parent| {
-            // Side 1: Front (+Z)
-            // No rotation needed, just face Z
+            // FRONT Label (+Z)
+            // Position: On surface (Radius)
+            // Rotation: None (Faces +Z)
             spawn_label(
                 parent, 
-                Vec3::new(0.0, 0.0, STANDARD_BALL_RADIUS - 0.001), 
+                Vec3::new(0.0, 0.0, STANDARD_BALL_RADIUS), 
                 Quat::IDENTITY
             );
 
-            // Side 2: Back (-Z)
-            // Rotate 180 degrees (PI) around Y so the number isn't backwards
+            // BACK Label (-Z)
+            // Position: On surface (-Radius)
+            // Rotation: Flip 180 degrees around Y axis so it reads correctly
             spawn_label(
                 parent, 
-                Vec3::new(0.0, 0.0, -STANDARD_BALL_RADIUS + 0.001), 
+                Vec3::new(0.0, 0.0, -STANDARD_BALL_RADIUS), 
                 Quat::from_rotation_y(std::f32::consts::PI)
             );
         });
