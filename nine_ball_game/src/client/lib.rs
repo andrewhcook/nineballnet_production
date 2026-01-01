@@ -735,18 +735,38 @@ fn setup_numbers_above_pool_balls(
     mut commands: Commands, 
     mut meshes: ResMut<Assets<Mesh>>, 
     mut materials: ResMut<Assets<StandardMaterial>>, 
-    ball_query: Query<(Entity, &PoolBalls)> // Changed query to just get Entity + Component
+    ball_query: Query<(Entity, &PoolBalls)>
 ) {
     let font_data = include_bytes!("../../assets/fonts/Roboto-Black.ttf");
     let mut generator = MeshGenerator::new(font_data);
+    
+    // Shared Resources
+    // 1. The White Circle Background (The "Decal")
+    let circle_mesh_handle = meshes.add(Circle::new(0.025)); // 2.5cm radius circle
+    let circle_material_handle = materials.add(StandardMaterial {
+        base_color: Color::WHITE,
+        perceptual_roughness: 0.8,
+        unlit: true, // Always bright white
+        ..default()
+    });
+
+    // 2. The Black Number Material
+    let text_material_handle = materials.add(StandardMaterial {
+        base_color: Color::BLACK,
+        unlit: true, // Always readable
+        ..default()
+    });
 
     for (ball_entity, pool_ball) in ball_query.iter() {
         let number_str = pool_ball.0.to_string();
         
-        // Generate the text mesh
-        let transform = Mat4::from_scale(Vec3::new(0.075, 0.075, 0.0075)).to_cols_array();
+        // Generate Text Mesh
+        // We center the text using the generator's transform
+        let transform = Mat4::from_scale(Vec3::new(0.05, 0.05, 0.05)) // Smaller text scale
+             .mul_mat4(&Mat4::from_translation(Vec3::new(-0.25, -0.25, 0.0))); // Rough centering adjustment
+             
         let text_mesh: MeshText = generator
-            .generate_section(&number_str, false, Some(&transform))
+            .generate_section(&number_str, false, Some(&transform.to_cols_array()))
             .unwrap();
 
         let vertices = text_mesh.vertices;
@@ -757,37 +777,49 @@ fn setup_numbers_above_pool_balls(
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
         mesh.compute_flat_normals();
+        let text_mesh_handle = meshes.add(mesh);
 
-        // Spawn the Number as a CHILD of the Ball
-        // We spawn it twice (front and back) so you can see it roll from any angle
-        let material_handle = materials.add(StandardMaterial {
-            base_color: Color::BLACK,
-            unlit: true, // Make numbers easy to read even in shadow
-            ..default()
-        });
-        
+        // We use a helper closure to spawn the label twice (Front and Back)
+        let spawn_label = |parent: &mut ChildBuilder, offset: Vec3, rotation: Quat| {
+            // A. The White Circle
+            parent.spawn(MaterialMeshBundle {
+                mesh: circle_mesh_handle.clone(),
+                material: circle_material_handle.clone(),
+                transform: Transform::from_translation(offset)
+                    .with_rotation(rotation),
+                ..default()
+            })
+            .with_children(|circle_parent| {
+                // B. The Number (Child of the circle)
+                circle_parent.spawn(MaterialMeshBundle {
+                    mesh: text_mesh_handle.clone(),
+                    material: text_material_handle.clone(),
+                    // Slight Z-offset so it sits ON TOP of the white circle
+                    transform: Transform::from_translation(Vec3::new(-0.015, -0.015, 0.001)), 
+                    ..default()
+                });
+            });
+        };
+
         commands.entity(ball_entity).with_children(|parent| {
-            // "Front" Number
-            parent.spawn(MaterialMeshBundle {
-                mesh: meshes.add(mesh.clone()),
-                material: material_handle.clone(),
-                // Position it slightly outside the sphere radius so it doesn't clip
-                transform: Transform::from_translation(Vec3::new(0.0, STANDARD_BALL_RADIUS + 0.001, 0.0))
-                           .with_rotation(Quat::from_rotation_x(-1.57)), // Lay flat on top
-                ..default()
-            });
+            // Side 1: Front (+Z)
+            // No rotation needed, just face Z
+            spawn_label(
+                parent, 
+                Vec3::new(0.0, 0.0, STANDARD_BALL_RADIUS - 0.001), 
+                Quat::IDENTITY
+            );
 
-            // "Side" Number (Optional, helps visualize roll better)
-            parent.spawn(MaterialMeshBundle {
-                mesh: meshes.add(mesh),
-                material: material_handle,
-                transform: Transform::from_translation(Vec3::new(0.0, 0.0, STANDARD_BALL_RADIUS + 0.001)),
-                ..default()
-            });
+            // Side 2: Back (-Z)
+            // Rotate 180 degrees (PI) around Y so the number isn't backwards
+            spawn_label(
+                parent, 
+                Vec3::new(0.0, 0.0, -STANDARD_BALL_RADIUS + 0.001), 
+                Quat::from_rotation_y(std::f32::consts::PI)
+            );
         });
     }
 }
-
 
 fn increase_shot_power(mut commands: Commands,  mut shot_power_query: Query<(Entity, &mut ShotPower)>) {
     if let Ok((shot_power_entity, mut shot_power)) = shot_power_query.get_single_mut() {
