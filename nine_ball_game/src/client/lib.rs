@@ -225,6 +225,12 @@ fn configure_app(app: &mut App) {
        ).run_if(should_show_player_shot_controls))
        .add_systems(Update, ball_in_hand.run_if(should_show_player_shot_controls))
        .add_systems(Update, despawn_aimer_polyline.run_if(should_not_show_player_shot_controls));
+
+    // In configure_app or setup:
+    app.insert_resource(AmbientLight {
+    color: Color::srgb(1.0, 1.0, 1.0),
+    brightness: 200.0, // Low brightness so it doesn't wash out shadows
+});
 }
 
 
