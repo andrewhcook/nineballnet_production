@@ -6,7 +6,8 @@ use bevy::{color::palettes::css::WHITE, prelude::*};
 use bevy::color::palettes::css; 
 use bevy_rapier3d::prelude::*;
 use ewebsock::{WsSender, WsReceiver, WsEvent, WsMessage};
-
+use bevy::core_pipeline::bloom::BloomSettings;
+use bevy::core_pipeline::tonemapping::Tonemapping;
 
 #[path = "../lib.rs"] 
 mod root_logic;
@@ -88,45 +89,62 @@ const DEFAULT_WALL_COLOR: Color = Color::Hsla(Hsla::new(15.0, 0.65, 0.20, 1.0));
 const DEFAULT_FELT_COLOR: Color = Color::Hsla(Hsla::new(210.0, 0.65, 0.45, 1.0));
 
 fn setup_physics(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>,   mut materials: ResMut<Assets<StandardMaterial>>, mut fonts: ResMut<Assets<Font>>, ) {
+
+
+    let felt_material = materials.add(StandardMaterial {
+        base_color: DEFAULT_FELT_COLOR,
+        perceptual_roughness: 0.9, // Very rough (absorbs light)
+        reflectance: 0.1, // Low reflectivity
+        ..default()
+    });
+
+    // B. The RAIL Material (Wood/lacquer look)
+    let rail_material = materials.add(StandardMaterial {
+        base_color: DEFAULT_WALL_COLOR,
+        perceptual_roughness: 0.3, // Semi-glossy wood
+        reflectance: 0.5,
+        ..default()
+    });
+
     commands
     .spawn(RigidBody::Fixed)
       //  .insert(Friction{coefficient: FRICTION_COEFF, combine_rule: CoefficientCombineRule::Average})
-      .insert(MaterialMeshBundle {mesh: meshes.add(Cuboid::from_corners(Vec3::new(2.25, 0.0, 4.5), Vec3::new(-2.25, 0.0, -4.5))), material: materials.add(StandardMaterial::from_color(DEFAULT_FELT_COLOR)), ..default()})
+      .insert(MaterialMeshBundle {mesh: meshes.add(Cuboid::from_corners(Vec3::new(2.25, 0.0, 4.5), Vec3::new(-2.25, 0.0, -4.5))), material: felt_material.clone(), ..default()})
         .insert(TransformBundle::from(Transform::from_xyz(0.0, 0.0, 0.0)));
 
 
       commands
     .spawn(RigidBody::Fixed)
       //  .insert(Friction{coefficient: FRICTION_COEFF, combine_rule: CoefficientCombineRule::Average})
-      .insert(MaterialMeshBundle {mesh: meshes.add(Cuboid::from_corners(Vec3::new(12.25, 0.0, 14.5), Vec3::new(-12.25, 0.0, -14.5))), material: materials.add(StandardMaterial::from_color(DEFAULT_FELT_COLOR)), ..default()})
+      .insert(MaterialMeshBundle {mesh: meshes.add(Cuboid::from_corners(Vec3::new(12.25, 0.0, 14.5), Vec3::new(-12.25, 0.0, -14.5))), material: felt_material.clone(), ..default()})
         .insert(TransformBundle::from(Transform::from_xyz(0.0, 3.0, 0.0)));
 
     //create the walls
     commands
     .spawn(RigidBody::Fixed)
-    .insert(MaterialMeshBundle {mesh: meshes.add(WALL_MESH_DIMENSIONS), material: materials.add(StandardMaterial::from_color(DEFAULT_WALL_COLOR)), ..default()})
+    .insert(MaterialMeshBundle {mesh: meshes.add(WALL_MESH_DIMENSIONS), material: rail_material.clone(), ..default()})
     .insert(TransformBundle::from_transform(Transform::from_translation(Vec3::new(TABLE_WIDTH, 0.0, TABLE_WIDTH))));
 
     commands
     .spawn(RigidBody::Fixed)
-    .insert(MaterialMeshBundle {mesh: meshes.add(WALL_MESH_DIMENSIONS), material: materials.add(StandardMaterial::from_color(DEFAULT_WALL_COLOR)), ..default()})
+    .insert(MaterialMeshBundle {mesh: meshes.add(WALL_MESH_DIMENSIONS), material: rail_material.clone(), ..default()})
     .insert(TransformBundle::from_transform(Transform::from_translation(Vec3::new(TABLE_WIDTH, 0.0, -TABLE_WIDTH))));
 commands
     .spawn(RigidBody::Fixed)
-    .insert(MaterialMeshBundle {mesh: meshes.add(WALL_MESH_DIMENSIONS), material: materials.add(StandardMaterial::from_color(DEFAULT_WALL_COLOR)), ..default()})
+    .insert(MaterialMeshBundle {mesh: meshes.add(WALL_MESH_DIMENSIONS), material: rail_material.clone(), ..default()})
     .insert(TransformBundle::from_transform(Transform::from_translation(Vec3::new(-TABLE_WIDTH, 0.0, TABLE_WIDTH))));
 
     commands
     .spawn(RigidBody::Fixed)
-    .insert(MaterialMeshBundle {mesh: meshes.add(WALL_MESH_DIMENSIONS), material: materials.add(StandardMaterial::from_color(DEFAULT_WALL_COLOR)), ..default()})
+    .insert(MaterialMeshBundle {mesh: meshes.add(WALL_MESH_DIMENSIONS), material: rail_material.clone(), ..default()})
     .insert(TransformBundle::from_transform(Transform::from_translation(Vec3::new(-TABLE_WIDTH, 0.0, -TABLE_WIDTH))));
     commands
     .spawn(RigidBody::Fixed)
-    .insert(MaterialMeshBundle {mesh: meshes.add(BACK_WALL_MESH_DIMENSIONS), material: materials.add(StandardMaterial::from_color(DEFAULT_WALL_COLOR)), ..default()})
+    .insert(MaterialMeshBundle {mesh: meshes.add(BACK_WALL_MESH_DIMENSIONS), material: rail_material.clone(), ..default()})
     .insert(TransformBundle::from_transform(Transform::from_translation(Vec3::new(0.0, 0.0, -TABLE_LENGTH))));
     commands
     .spawn(RigidBody::Fixed)
-    .insert(MaterialMeshBundle {mesh: meshes.add(BACK_WALL_MESH_DIMENSIONS), material: materials.add(StandardMaterial::from_color(DEFAULT_WALL_COLOR)), ..default()})
+    .insert(MaterialMeshBundle {mesh: meshes.add(BACK_WALL_MESH_DIMENSIONS), material: rail_material.clone(), ..default()})
     .insert(TransformBundle::from_transform(Transform::from_translation(Vec3::new(0.0, 0.0, TABLE_LENGTH))));
 
     //make aimer
@@ -134,9 +152,9 @@ commands
     commands.spawn(Aimer).insert(Sensor);
     
  //   commands.spawn(TargetBallTorus)
-   // .insert(MaterialMeshBundle{mesh: meshes.add(TARGET_BALL_TORUS_DIMENSIONS), material: materials.add(StandardMaterial::from_color(DEFAULT_WALL_COLOR)), ..default()});
+   // .insert(MaterialMeshBundle{mesh: meshes.add(TARGET_BALL_TORUS_DIMENSIONS), material: materials.addrail_material), ..default()});
 
-   // commands.spawn(TargetBallTorus).insert(MaterialMeshBundle{mesh: meshes.add(TARGET_BALL_TORUS_DIMENSIONS), material: materials.add(StandardMaterial::from_color(DEFAULT_WALL_COLOR)), ..default()});;
+   // commands.spawn(TargetBallTorus).insert(MaterialMeshBundle{mesh: meshes.add(TARGET_BALL_TORUS_DIMENSIONS), material: materials.addrail_material), ..default()});;
 
 }
 
@@ -213,12 +231,33 @@ fn configure_app(app: &mut App) {
 
 fn setup(mut commands: Commands, asset_server: Res<AssetServer>, mut meshes: ResMut<Assets<Mesh>>,   mut materials: ResMut<Assets<ColorMaterial>>) {
     // Add a camera
-  commands.spawn((Camera3dBundle {
-        transform: Transform::from_translation(CAMERA_HEIGHT).looking_at(Vec3::ZERO, Vec3::Y),
-        ..Default::default()
-    }, MyGameCamera));
+  commands.spawn((
+        Camera3dBundle {
+            transform: Transform::from_translation(CAMERA_HEIGHT)
+                .looking_at(Vec3::ZERO, Vec3::Y),
+            tonemapping: Tonemapping::AcesFitted, // <--- Film-like color grading
+            ..Default::default()
+        },
+        BloomSettings::NATURAL, // <--- Makes highlights glow softly
+        MyGameCamera
+    ));
 
+// 2. Main Overhead Light (The "Pool Hall" Light)
+    commands.spawn(PointLightBundle {
+        point_light: PointLight {
+            intensity: 1_500_000.0, // Much brighter (Lumens-ish)
+            range: 50.0,
+            shadows_enabled: true, // <--- Crucial for grounding the balls
+            radius: 0.5, // Softens the shadows slightly
+            color: Color::srgb(1.0, 0.95, 0.9), // Slightly warm/tungsten
+            ..default()
+        },
+        transform: Transform::from_xyz(0.0, 8.0, 0.0), // Higher up
+        ..default()
+    });
 
+    // Optional: Fill lights (keep these dim, no shadows, just to light up the dark sides)
+    // You can remove your old 4-corner lights or keep them very dim (intensity ~5000)
     commands.spawn(PointLightBundle::default() );
     commands.spawn(PointLightBundle{transform: Transform::from_translation(Vec3::new(-10.0, 10.0, 0.0)), ..default()});
     commands.spawn(PointLightBundle{transform: Transform::from_translation(Vec3::new(10.0, 10.0, 0.0)), ..default()});
@@ -386,6 +425,8 @@ fn ball_color(n: usize) -> Color {
 
 fn spawn_pool_balls(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>,   mut materials: ResMut<Assets<StandardMaterial>>, mut fonts: ResMut<Assets<Font>>, gamestate: Res<GameState>) {
 
+
+    
     // Spawn Cue Ball with correct height
     commands.spawn(CueBall).insert(MaterialMeshBundle {
         mesh: meshes.add(Sphere::new(CUE_BALL_RADIUS)), 
@@ -395,16 +436,21 @@ fn spawn_pool_balls(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>,   
     
     // Spawn Object Balls (1-9) with correct color and height
     for i in 1 as usize..=9 as usize{
-        let color = ball_color(i);
+       let color = ball_color(i);
         commands.spawn(PoolBalls(i as u32))
             .insert(MaterialMeshBundle {
-                mesh: meshes.add(Sphere::new(STANDARD_BALL_RADIUS)), 
-                material: materials.add(StandardMaterial::from_color(color)), 
-                // FIX: Setting Y-translation to STANDARD_BALL_RADIUS to lift the ball off the table.
+                mesh: meshes.add(Sphere::new(STANDARD_BALL_RADIUS)),
+                material: materials.add(StandardMaterial {
+                    base_color: color,
+                    perceptual_roughness: 0.15, // Smooth, polished look
+                    reflectance: 0.5, // Standard dielectric reflectance
+                    metallic: 0.0, // Balls are plastic/resin, NOT metal
+                    ..default()
+                }),
                 transform: Transform::from_translation(Vec3::new(0.0, STANDARD_BALL_RADIUS, 0.0)),
                 ..default()
-            })
-            .insert(Collider::ball(STANDARD_BALL_RADIUS));
+            }
+        );
     }
 }
 
