@@ -17,7 +17,7 @@ server:
         must_exist: false
         folder:
           uri: "/"                      # Serves files at root (e.g. /nineball.js)
-          path: "assets/static/pkg"     # The folder on disk you confirmed
+          path: "assets"     # The folder on disk you confirmed
     # Compresses responses (gzip) for speed
     compression:
       enable: true
