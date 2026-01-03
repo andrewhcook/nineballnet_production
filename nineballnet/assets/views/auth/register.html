@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="flex min-h-full flex-col justify-center px-6 py-12 lg:px-8 bg-gray-900">
+<div class="flex min-h-full flex-col justify-center items-center px-6 py-12 lg:px-8 bg-gray-900">
+  
   <div class="sm:mx-auto sm:w-full sm:max-w-sm">
     <h2 class="mt-10 text-center text-2xl font-bold leading-9 tracking-tight text-white">Create your account</h2>
   </div>
@@ -42,5 +43,35 @@
       <a href="/api/auth/login_view" class="font-semibold leading-6 text-indigo-400 hover:text-indigo-300">Sign in</a>
     </p>
   </div>
+
+  <div class="mt-16 w-full max-w-4xl">
+    <h3 class="text-center text-sm font-semibold text-gray-500 uppercase tracking-wider mb-6">Gameplay Highlights</h3>
+    
+    <div class="grid grid-cols-1 gap-6 sm:grid-cols-3">
+      
+      <div class="relative rounded-lg overflow-hidden border border-white/10 shadow-2xl bg-black">
+        <video controls muted class="w-full h-auto opacity-90 hover:opacity-100 transition-opacity">
+          <source src="/static/videos/gameplay_1.mp4" type="video/mp4">
+          Your browser does not support the video tag.
+        </video>
+      </div>
+
+      <div class="relative rounded-lg overflow-hidden border border-white/10 shadow-2xl bg-black">
+        <video controls muted class="w-full h-auto opacity-90 hover:opacity-100 transition-opacity">
+          <source src="/static/videos/gameplay_2.mp4" type="video/mp4">
+          Your browser does not support the video tag.
+        </video>
+      </div>
+
+      <div class="relative rounded-lg overflow-hidden border border-white/10 shadow-2xl bg-black">
+        <video controls muted class="w-full h-auto opacity-90 hover:opacity-100 transition-opacity">
+          <source src="/static/videos/gameplay_3.mp4" type="video/mp4">
+          Your browser does not support the video tag.
+        </video>
+      </div>
+
+    </div>
+  </div>
+
 </div>
 {% endblock content %}
