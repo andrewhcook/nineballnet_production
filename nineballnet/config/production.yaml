@@ -32,7 +32,7 @@ server:
       enable: true
       # In strict production, replace '*' with your actual frontend URL
       allow_origins:
-        - "*"
+        - "www.nine-ball.net"
       allow_methods:
         - GET
         - POST
