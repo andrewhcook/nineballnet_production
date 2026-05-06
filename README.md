@@ -1,4 +1,4 @@
-#### https://nine-ball.net
+# https://nine-ball.net
 
 ### Purpose of Project 
 This project features the majority of the source code supporting the implementation of nine-ball.net, a website devoted to 2-player digital nine-ball pool.
@@ -23,9 +23,9 @@ As of 5-6-26:
 
 ## Project Structure
 
-  ### nine_ball_game
+  ### ./nine_ball_game
   #### contains game logic for the WASM-compiled Bevy project.
-  ### ninballnet
+  ### ./ninballnet
   #### contains code related to the Loco.rs (a Rails-like Rust framework) application handling frontend logic and db query logic.
-  ### ninballnetallocator
+  ### ./ninballnetallocator
   #### this codebase contains logic related to the matchmaking functionality of nine-ball.net.
