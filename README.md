@@ -24,8 +24,8 @@ As of 5-6-26:
 ## Project Structure
 
   ### nine_ball_game
-    #### contains game logic for the WASM-compiled Bevy project.
+  #### contains game logic for the WASM-compiled Bevy project.
   ### ninballnet
-    #### contains code related to the Loco.rs (a Rails-like Rust framework) application handling frontend logic and db query logic.
+  #### contains code related to the Loco.rs (a Rails-like Rust framework) application handling frontend logic and db query logic.
   ### ninballnetallocator
-    #### this codebase contains logic related to the matchmaking functionality of nine-ball.net.
+  #### this codebase contains logic related to the matchmaking functionality of nine-ball.net.
